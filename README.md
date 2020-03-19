@@ -1,2 +1,2 @@
-# DeMON
-DeMON - Decentralized Edge Management and Monitoring 
+# DeMMon
+DeMMon - Decentralized Edge Management and Monitoring 
