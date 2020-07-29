@@ -2,6 +2,19 @@
 
 ## Core concepts:
 
+<!-- * ### Tenant:
+
+    * A Resource manager (ingests resource collections) and emits deployment configurations
+
+* ###  Node:
+
+    * A node belonging to any entity in any system
+
+* ### Domain:
+
+    * The domain in which the node is installed, i.e. AWS, Google, etc. -->
+
+
 * ### Metric: 
 
      * Fields:
@@ -14,22 +27,9 @@
 
         * Domain (for restricting the emission of metrics)
 
+* ### System Metrics (built into the system)
 
-* ### Tenant:
-
-    * A Resource manager (ingests resource collections) and emits deployment configurations
-
-* ###  Node:
-
-    * A node belonging to any entity in any system
-
-* ### Domain:
-
-    * The domain in which the node is installed, i.e. AWS, Google, etc.
-
-* ### Node attributes:
-
-*   Physical resources:
+    *   Physical resources:
 
     * CPU
     * Memory
@@ -38,72 +38,44 @@
 *   Logical resources:
 
     * connected peers
-    * components running
+    * components (applications) running
     * Latency pairs <s1,s2>
 
-## Libraries (running on cloud, edge servers, and clients)
 
-* ### Cloud Library
-
-    * Accept connections from clients
-    * Has a generalized view of the system
-
-    * API: 
-
-* ### Edge Library
-
-    * Accept connections from clients
-    * Propagates information regarding pushed metrics
-    * Performs aggregation
-
-    * API:
-
-
-* ### Client Library
-
-    * Intercept requests between applications and servers and piggyback information
-    * Possibly help on routing
-    * Can be a router for the connected servers (possibly offering improvements)
-    * Push information periodically to nearby servers
-
-    * API:
-
-
-
-## Management API
+# API
 
 <!-- * ### Add Domain -->
 <!-- * ### Remove Domain -->
 
-* ### Metrics
+* ### Applications:
+
+    * InstallApplication(AppName)
+
+* ### Metrics:
 
     * InstallMetrics([]MetricDescriptor)
 
     * SubscribeMetrics(MetricDescriptor[])
 
-* ### Alerts
+* ### Alerts:
 
     * InstallAlert(AlertDescriptor)
 
-* ### Routing
+* ### Querying:
+
+    * FindResources([]Filter) []Peers
+
+    * QueryMetric(MetricName, queryParams)
+
+* ### Routing:
 
     * FindPeer(peerID) Peer
 
     * FindResponsiblePeer(resourceName) Peer
 
-    * FindResources([]Filter) []Peers
-
-    * QueryMetrics(MetricName)
 
 
-## Topology 
-
-*   Bias topology according to metrics exposed (and latency??)
-*   Levels
-
-## Agregation
-
-# Good ideas: 
+# ideas: 
 
 ## Agregation:
 
