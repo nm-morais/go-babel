@@ -16,15 +16,7 @@
 
 * ### Metric: 
 
-     * Fields:
-
-        * Aggregation method (Sum, Avg, Histogram)
-
-        * Metric ID: an identifier for the collected metric (i.e. certificate hash / name)
-
-        * Issuer (i.e. Application ID, tenant ID)
-
-        * Domain (for restricting the emission of metrics)
+    A metric consists in the raw measurement of a certain aspect of the system (i.e. resource usage, application response time, among others)
 
 # API
 
@@ -33,43 +25,62 @@
 
 * ### Applications:
 
-    * InstallApplication(AppName)
+    * ### InstallApplication(AppName) -> bool
 
-* ### Metrics:
+    * ### InstallComponent(ComponentName, NodeID) -> bool
 
-    * InstallMetrics([]MetricDescriptor)
+* ## Metrics:
 
-    * SubscribeMetrics(MetricDescriptor[])
+    * ### InstallMetrics([]MetricDescriptor) -> []Metrics 
 
-* ### Alerts:
+    * ### SubscribeToMetrics(MetricDescriptor[]) -> []Metrics
 
-    * InstallAlert(AlertDescriptor)
+* ## Alerts:
 
-* ### Querying:
+    * ### InstallAlert(AlertDescriptor) -> void
 
-    * FindResources([]Filter) []Peers
+* ## Querying:
 
-    * QueryMetric(MetricName, queryParams)
+    * ### FindResources([]Filter) -> []Peers
 
-* ### Routing:
+    * ### QueryMetric(MetricName, queryParams) -> map[metricName]Values
 
-    * FindPeer(peerID) Peer
+* ## Routing:
 
-    * FindResponsiblePeer(resourceName) Peer
+    * ### FindPeer(peerID) Peer
+
+    * ### FindResponsiblePeer(resourceName) Peer
 
 # Built-in metrics
 
-*   Physical resources:
+* ### Node metrics:
 
     * CPU
     * Memory
-    * Disk
+    * Disk space
+    * Running components
 
-*   Logical resources:
+* ### Network metrics
 
-    * connected peers
-    * components (applications) running
+    * Connected peers
+    * Bandwidth utilization
     * Latency pairs <s1,s2>
+
+* ### Applicational metrics
+
+    * Service status and availability
+
+# Metric 
+
+* ### Fields:
+
+    * Aggregation method (Sum, Avg, Histogram, None)
+
+    * Metric ID: an identifier for the collected metric (i.e. certificate hash / name)
+
+    * Issuer (i.e. Application ID, tenant ID)
+
+    * Domain (for restricting the emission of metrics)
 
 # Ideas: 
 
@@ -91,8 +102,8 @@
 
     * A probe which emits metrics to "responsible" servers (push approach), the control of the parent is delegated to the emiting node
 
-
 ## Topology:
 
+* Connection bias
 * If peers are interested in a subset of the metrics collected, then their links should bias towards the peers which are interested in those metrics 
 
