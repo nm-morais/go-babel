@@ -1,4 +1,4 @@
-package pkg
+package errors
 
 type Error interface {
 	Fatal() bool

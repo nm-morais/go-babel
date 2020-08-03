@@ -1,16 +1,16 @@
 package transport
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/pkg"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/errors"
+	"github.com/nm-morais/go-babel/pkg/peer"
 )
 
 type Transport interface {
 	Listen() <-chan Transport
 	Peer() peer.Peer
-	Dial(peer peer.Peer) <-chan pkg.Error
+	Dial(peer peer.Peer) <-chan errors.Error
 	PipeToMessageChan() <-chan []byte
 	MessageChan() <-chan []byte
-	SendMessage(message []byte) pkg.Error
+	SendMessage(message []byte) errors.Error
 	Close()
 }

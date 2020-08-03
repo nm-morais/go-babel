@@ -1,10 +1,10 @@
 package main
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/examples/pingPong"
-	"github.com/nm-morais/DeMMon/go-babel/pkg"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/transport"
+	"github.com/nm-morais/go-babel/examples/pingPong"
+	"github.com/nm-morais/go-babel/pkg"
+	"github.com/nm-morais/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/transport"
 	"net"
 )
 

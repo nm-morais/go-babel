@@ -3,8 +3,7 @@ package message
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/serialization"
+	"github.com/nm-morais/go-babel/pkg/protocol"
 	"io"
 )
 
@@ -26,11 +25,11 @@ func (msg ProtoHandshakeMessage) Type() ID {
 
 type ProtoHandshakeMessageSerializer struct{}
 
-func (msg ProtoHandshakeMessage) Serializer() serialization.Serializer {
+func (msg ProtoHandshakeMessage) Serializer() Serializer {
 	return protoHandshakeMessageSerializer
 }
 
-func (msg ProtoHandshakeMessage) Deserializer() serialization.Deserializer {
+func (msg ProtoHandshakeMessage) Deserializer() Deserializer {
 	return protoHandshakeMessageSerializer
 }
 

@@ -2,8 +2,7 @@ package serialization
 
 import (
 	"fmt"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/serialization"
+	"github.com/nm-morais/go-babel/pkg/message"
 	"sync"
 )
 
@@ -19,27 +18,27 @@ func NewSerializationManager() *Manager {
 	}
 }
 
-func (m *Manager) GetDeserializer(id message.ID) serialization.Deserializer {
+func (m *Manager) GetDeserializer(id message.ID) message.Deserializer {
 	deserializer, ok := m.deserializers.Load(id)
 	if !ok {
 		panic(fmt.Sprintf("No deserializer for messageID: %d", id))
 	}
-	return deserializer.(serialization.Deserializer)
+	return deserializer.(message.Deserializer)
 }
 
-func (m *Manager) GetSerializer(id message.ID) serialization.Serializer {
+func (m *Manager) GetSerializer(id message.ID) message.Serializer {
 	serializer, ok := m.serializers.Load(id)
 	if !ok {
 		panic(fmt.Sprintf("No serializer for messageID: %d", id))
 	}
-	return serializer.(serialization.Serializer)
+	return serializer.(message.Serializer)
 }
 
-func (m *Manager) RegisterDeserializer(id message.ID, serializer serialization.Deserializer) {
+func (m *Manager) RegisterDeserializer(id message.ID, serializer message.Deserializer) {
 	m.deserializers.Store(id, serializer)
 }
 
-func (m *Manager) RegisterSerializer(id message.ID, serializer serialization.Serializer) {
+func (m *Manager) RegisterSerializer(id message.ID, serializer message.Serializer) {
 	m.deserializers.Store(id, serializer)
 }
 

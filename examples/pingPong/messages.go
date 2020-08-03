@@ -3,8 +3,7 @@ package pingPong
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/serialization"
+	"github.com/nm-morais/go-babel/pkg/message"
 	"io"
 )
 
@@ -24,11 +23,11 @@ func (Ping) Type() message.ID {
 	return PingMessageType
 }
 
-func (msg Ping) Serializer() serialization.Serializer {
+func (msg Ping) Serializer() message.Serializer {
 	return pingSerializer
 }
 
-func (msg Ping) Deserializer() serialization.Deserializer {
+func (msg Ping) Deserializer() message.Deserializer {
 	return pingSerializer
 }
 
@@ -65,11 +64,11 @@ func (Pong) Type() message.ID {
 	return PongMessageType
 }
 
-func (msg Pong) Serializer() serialization.Serializer {
+func (msg Pong) Serializer() message.Serializer {
 	return pongSerializer
 }
 
-func (msg Pong) Deserializer() serialization.Deserializer {
+func (msg Pong) Deserializer() message.Deserializer {
 	return pongSerializer
 }
 

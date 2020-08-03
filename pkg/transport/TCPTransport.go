@@ -1,9 +1,8 @@
 package transport
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/pkg"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/errors"
+	"github.com/nm-morais/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
 	"net"
 )
@@ -16,6 +15,8 @@ type TCPTransport struct {
 	peer       peer.Peer
 	msgChan    chan []byte
 }
+
+const MaxMessageBytes = 2048
 
 func NewTCPListener(listenAddr net.Addr) Transport {
 	return &TCPTransport{
@@ -59,26 +60,26 @@ func (t *TCPTransport) Listen() <-chan Transport {
 	}
 }
 
-func (t *TCPTransport) SendMessage(msgBytes []byte) pkg.Error {
+func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 	_, err := t.conn.Write(msgBytes)
 	if err != nil {
-		return pkg.NonFatalError(500, err.Error(), TCPTransportCaller)
+		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 	}
 	return nil
 }
 
-func (t *TCPTransport) Dial(peer peer.Peer) <-chan pkg.Error {
-	errChan := make(chan pkg.Error)
+func (t *TCPTransport) Dial(peer peer.Peer) <-chan errors.Error {
+	errChan := make(chan errors.Error)
 	go func() {
 		addr, err := net.ResolveTCPAddr(peer.Addr().String(), peer.Addr().Network())
 		if err != nil {
-			errChan <- pkg.NonFatalError(500, err.Error(), TCPTransportCaller)
+			errChan <- errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 			close(errChan)
 			return
 		}
 		conn, err := net.DialTCP("tcp", nil, addr)
 		if err != nil {
-			errChan <- pkg.NonFatalError(500, err.Error(), TCPTransportCaller)
+			errChan <- errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 			close(errChan)
 			return
 		}
@@ -96,7 +97,7 @@ func (t *TCPTransport) PipeToMessageChan() <-chan []byte {
 	t.msgChan = msgChan
 	go func() {
 		for {
-			msgBytes := make([]byte, message.MaxMessageBytes)
+			msgBytes := make([]byte, MaxMessageBytes)
 			read, err := t.conn.Read(msgBytes)
 			if err != nil {
 				log.Error(err)

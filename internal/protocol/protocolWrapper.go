@@ -2,14 +2,14 @@ package protocol
 
 import (
 	"fmt"
-	"github.com/nm-morais/DeMMon/go-babel/pkg"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/handlers"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/notification"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/request"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/timer"
+	"github.com/nm-morais/go-babel/pkg/errors"
+	"github.com/nm-morais/go-babel/pkg/handlers"
+	"github.com/nm-morais/go-babel/pkg/message"
+	"github.com/nm-morais/go-babel/pkg/notification"
+	"github.com/nm-morais/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/request"
+	"github.com/nm-morais/go-babel/pkg/timer"
 )
 
 type WrapperProtocol struct {
@@ -156,7 +156,7 @@ func (pw *WrapperProtocol) handleChannels() {
 func (pw *WrapperProtocol) handleNotification(notification notification.Notification) {
 	handler, ok := pw.notificationHandlers[notification.ID()]
 	if !ok {
-		panic(pkg.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
 	}
 	handler(notification)
 }
@@ -164,7 +164,7 @@ func (pw *WrapperProtocol) handleNotification(notification notification.Notifica
 func (pw *WrapperProtocol) handleTimer(timer timer.Timer) {
 	handler, ok := pw.timerHandlers[timer.ID()]
 	if !ok {
-		panic(pkg.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
 	}
 	handler(timer)
 }
@@ -172,7 +172,7 @@ func (pw *WrapperProtocol) handleTimer(timer timer.Timer) {
 func (pw *WrapperProtocol) handleReply(reply request.Reply) {
 	handler, ok := pw.requestHandlers[reply.ID()]
 	if !ok {
-		panic(pkg.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
 	}
 	handler(reply)
 }
@@ -180,7 +180,7 @@ func (pw *WrapperProtocol) handleReply(reply request.Reply) {
 func (pw *WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
-		panic(pkg.FatalError(404, "receivedMsg handler not found", string(pw.wrappedProtocol.ID())))
+		panic(errors.FatalError(404, "receivedMsg handler not found", string(pw.wrappedProtocol.ID())))
 	}
 	handler(peer, receivedMsg)
 }
@@ -188,7 +188,7 @@ func (pw *WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Mes
 func (pw *WrapperProtocol) handleRequest(request request.Request) request.Reply {
 	handler, ok := pw.requestHandlers[request.ID()]
 	if !ok {
-		panic(pkg.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
+		panic(errors.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
 	}
 	return handler(request)
 }
@@ -201,46 +201,46 @@ func (pw *WrapperProtocol) handleRequest(request request.Request) request.Reply 
 // replies
 // timer
 
-func (pw *WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) pkg.Error {
+func (pw *WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
 	_, exists := pw.messageHandlers[messageID]
 	if exists {
-		return pkg.FatalError(409, fmt.Sprintf("Message handler with MsgID: %d already exists", messageID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(409, fmt.Sprintf("Message handler with MsgID: %d already exists", messageID), string(pw.wrappedProtocol.ID()))
 	}
 	pw.messageHandlers[messageID] = handler
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterNotificationHandler(notificationID notification.ID, handler handlers.NotificationHandler) pkg.Error {
+func (pw *WrapperProtocol) RegisterNotificationHandler(notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
 	_, exists := pw.notificationHandlers[notificationID]
 	if exists {
-		return pkg.FatalError(409, fmt.Sprintf("Notification handler with notificationID: %d already exists", notificationID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(409, fmt.Sprintf("Notification handler with notificationID: %d already exists", notificationID), string(pw.wrappedProtocol.ID()))
 	}
 	pw.notificationHandlers[notificationID] = handler
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) pkg.Error {
+func (pw *WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
 	_, exists := pw.replyHandlers[replyID]
 	if exists {
-		return pkg.FatalError(409, fmt.Sprintf("Request handler with replyID: %d already exists", replyID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(409, fmt.Sprintf("Request handler with replyID: %d already exists", replyID), string(pw.wrappedProtocol.ID()))
 	}
 	pw.replyHandlers[replyID] = handler
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) pkg.Error {
+func (pw *WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
 	_, exists := pw.requestHandlers[requestID]
 	if exists {
-		return pkg.FatalError(409, fmt.Sprintf("Request handler with MsgID: %d already exists", requestID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(409, fmt.Sprintf("Request handler with MsgID: %d already exists", requestID), string(pw.wrappedProtocol.ID()))
 	}
 	pw.requestHandlers[requestID] = handler
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) pkg.Error {
+func (pw *WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
 	_, exists := pw.timerHandlers[timerID]
 	if exists {
-		return pkg.FatalError(409, fmt.Sprintf("Request handler with timerID: %d already exists", timerID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(409, fmt.Sprintf("Request handler with timerID: %d already exists", timerID), string(pw.wrappedProtocol.ID()))
 	}
 	pw.timerHandlers[timerID] = handler
 	return nil

@@ -1,7 +1,7 @@
 package pingPong
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/pkg/timer"
+	"github.com/nm-morais/go-babel/pkg/timer"
 	"time"
 )
 

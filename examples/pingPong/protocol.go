@@ -1,12 +1,12 @@
 package pingPong
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/pkg"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/timer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/transport"
+	"github.com/nm-morais/go-babel/pkg"
+	"github.com/nm-morais/go-babel/pkg/message"
+	"github.com/nm-morais/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/timer"
+	"github.com/nm-morais/go-babel/pkg/transport"
 	log "github.com/sirupsen/logrus"
 	"time"
 )

@@ -3,8 +3,7 @@ package message
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/serialization"
+	"github.com/nm-morais/go-babel/pkg/protocol"
 	"io"
 )
 
@@ -30,11 +29,11 @@ func (msg *AppMessageWrapper) Type() ID {
 	return msg.MessageID
 }
 
-func (msg *AppMessageWrapper) Serializer() serialization.Serializer {
+func (msg *AppMessageWrapper) Serializer() Serializer {
 	return appMessageWrapperSerializer
 }
 
-func (msg *AppMessageWrapper) Deserializer() serialization.Deserializer {
+func (msg *AppMessageWrapper) Deserializer() Deserializer {
 	return appMessageWrapperSerializer
 }
 

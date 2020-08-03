@@ -1,11 +1,11 @@
 package handlers
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/notification"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/request"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/timer"
+	"github.com/nm-morais/go-babel/pkg/message"
+	"github.com/nm-morais/go-babel/pkg/notification"
+	"github.com/nm-morais/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/request"
+	"github.com/nm-morais/go-babel/pkg/timer"
 )
 
 type RequestHandler func(request request.Request) request.Reply

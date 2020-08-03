@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/nm-morais/DeMMon/go-babel/pkg/peer"
+import "github.com/nm-morais/go-babel/pkg/peer"
 
 type ID uint16
 

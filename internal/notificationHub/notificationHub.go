@@ -1,9 +1,9 @@
 package notificationHub
 
 import (
-	internalProto "github.com/nm-morais/DeMMon/go-babel/internal/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/notification"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/protocol"
+	internalProto "github.com/nm-morais/go-babel/internal/protocol"
+	"github.com/nm-morais/go-babel/pkg/notification"
+	"github.com/nm-morais/go-babel/pkg/protocol"
 	"sync"
 )
 

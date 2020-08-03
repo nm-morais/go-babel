@@ -1,18 +1,19 @@
 package pkg
 
 import (
-	"github.com/nm-morais/DeMMon/go-babel/configs"
-	"github.com/nm-morais/DeMMon/go-babel/internal/notificationHub"
-	internalProto "github.com/nm-morais/DeMMon/go-babel/internal/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/internal/serialization"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/handlers"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/notification"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/protocol"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/request"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/timer"
-	"github.com/nm-morais/DeMMon/go-babel/pkg/transport"
+	"github.com/nm-morais/go-babel/configs"
+	"github.com/nm-morais/go-babel/internal/notificationHub"
+	internalProto "github.com/nm-morais/go-babel/internal/protocol"
+	"github.com/nm-morais/go-babel/internal/serialization"
+	"github.com/nm-morais/go-babel/pkg/errors"
+	"github.com/nm-morais/go-babel/pkg/handlers"
+	"github.com/nm-morais/go-babel/pkg/message"
+	"github.com/nm-morais/go-babel/pkg/notification"
+	"github.com/nm-morais/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/request"
+	"github.com/nm-morais/go-babel/pkg/timer"
+	"github.com/nm-morais/go-babel/pkg/transport"
 	"sync"
 )
 
@@ -102,48 +103,48 @@ func RegisterTransportListener(listener transport.Transport) {
 	p.listeningTransports = append(p.listeningTransports, listener)
 }
 
-func RegisterProtocol(protocol protocol.Protocol) Error {
+func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 	_, ok := p.protocols.Load(protocol.ID())
 	if ok {
-		return FatalError(409, "Protocol already registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol already registered", ProtoManagerCaller)
 	}
 	p.protocols.Store(protocol.ID(), protocol)
 	p.protoIds = append(p.protoIds, protocol.ID())
 	return nil
 }
 
-func RegisterNotificationHandler(protoID protocol.ID, notificationID notification.ID, handler handlers.NotificationHandler) Error {
+func RegisterNotificationHandler(protoID protocol.ID, notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if ok {
-		return FatalError(409, "Protocol already registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol already registered", ProtoManagerCaller)
 	}
 	p.notificationHub.AddListener(notificationID, proto.(protocolValueType))
 	proto.(protocolValueType).RegisterNotificationHandler(notificationID, handler)
 	return nil
 }
 
-func RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.TimerHandler) Error {
+func RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.TimerHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	proto.(protocolValueType).RegisterTimerHandler(timer, handler)
 	return nil
 }
 
-func RegisterRequestHandler(protoID protocol.ID, request request.ID, handler handlers.RequestHandler) Error {
+func RegisterRequestHandler(protoID protocol.ID, request request.ID, handler handlers.RequestHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	proto.(protocolValueType).RegisterRequestHandler(request, handler)
 	return nil
 }
 
-func RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) Error {
+func RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	p.serializationManager.RegisterSerializer(message.Type(), message.Serializer())
 	p.serializationManager.RegisterDeserializer(message.Type(), message.Deserializer())
@@ -152,10 +153,10 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 	return nil
 }
 
-func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) Error {
+func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) errors.Error {
 	conn, ok := p.activeTransports.Load(destPeer)
 	if !ok {
-		return NonFatalError(404, "No active connection to peer", ProtoManagerCaller)
+		return errors.NonFatalError(404, "No active connection to peer", ProtoManagerCaller)
 	}
 
 	go func() {
@@ -166,14 +167,14 @@ func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID,
 	return nil
 }
 
-func SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) Error {
+func SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
 	_, ok := p.protocols.Load(origin)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	proto, ok := p.protocols.Load(destination)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 
 	go func() {
@@ -184,28 +185,28 @@ func SendRequest(request request.Request, origin protocol.ID, destination protoc
 	return nil
 }
 
-func SendRequestReply(reply request.Reply, origin protocol.ID, destination protocol.ID) Error {
+func SendRequestReply(reply request.Reply, origin protocol.ID, destination protocol.ID) errors.Error {
 	_, ok := p.protocols.Load(origin)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	proto, ok := p.protocols.Load(destination)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	proto.(protocolValueType).DeliverRequestReply(reply)
 	return nil
 }
 
-func SendNotification(notification notification.Notification) Error {
+func SendNotification(notification notification.Notification) errors.Error {
 	p.notificationHub.AddNotification(notification)
 	return nil
 }
 
-func RegisterTimer(origin protocol.ID, timer timer.Timer) Error {
+func RegisterTimer(origin protocol.ID, timer timer.Timer) errors.Error {
 	callerProto, ok := p.protocols.Load(origin)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	defer func() { // TODO can be improved to use single routine instead of routine per channel
 		timer.Wait()
@@ -218,10 +219,10 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func Dial(peer peer.Peer, sourceProtoID protocol.ID, t transport.Transport) Error {
+func Dial(peer peer.Peer, sourceProtoID protocol.ID, t transport.Transport) errors.Error {
 	sourceProto, ok := p.protocols.Load(sourceProtoID)
 	if !ok {
-		return FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
 	decodedSourceProto := sourceProto.(protocolValueType)
 
