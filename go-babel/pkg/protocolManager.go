@@ -151,7 +151,7 @@ func (p ProtocolManager) SendMessage(toSend message.Message, peer peer.Peer, ori
 	if !ok {
 		return utils.NonFatalError(404, "No active connection to peer", ProtoManagerCaller)
 	}
-	go conn.(transport.Transport).SendMessage(message.NewAppMessageWrapper(origin, destinations, toSend))
+	conn.(transport.Transport).SendMessage(message.NewAppMessageWrapper(origin, destinations, toSend))
 	return nil
 }
 
@@ -164,7 +164,7 @@ func (p ProtocolManager) SendRequest(request request.Request, origin protocol.ID
 	if !ok {
 		return utils.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
-	go proto.(protocolValueType).DeliverRequest(origin, request)
+	proto.(protocolValueType).DeliverRequest(origin, request)
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (p ProtocolManager) RegisterTimer(origin protocol.ID, timer timer.Timer) Er
 	if !ok {
 		return utils.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
-	defer func() {
+	defer func() { // TODO can be improved to use single routine instead of routine per channel
 		timer.Wait()
 		callerProto.(protocolValueType).DeliverTimer(timer)
 	}()

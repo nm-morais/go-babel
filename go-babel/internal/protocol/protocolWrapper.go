@@ -79,8 +79,8 @@ func NewWrapperProtocol(protocol protocol.Protocol, manager pkg.ProtocolManager)
 		dialFailed:      make(chan peer.Peer, ChannelSize),
 		connDown:        make(chan peer.Peer, ChannelSize),
 		connEstablished: make(chan peer.Peer, ChannelSize),
-		dialSuccess:     make(chan dialSuccessWithBoolReplyChan), // interactive channel
-		inConnRequested: make(chan inConnReqEventWithBoolReply),  // interactive channel
+		dialSuccess:     make(chan dialSuccessWithBoolReplyChan, ChannelSize), // interactive channel
+		inConnRequested: make(chan inConnReqEventWithBoolReply, ChannelSize),  // interactive channel
 	}
 }
 
