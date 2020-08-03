@@ -1,8 +1,6 @@
 package message
 
-import (
-	"bytes"
-)
+import "github.com/nm-morais/DeMMon/go-babel/pkg/serialization"
 
 const MaxMessageBytes = 2048
 
@@ -10,6 +8,6 @@ type ID uint16
 
 type Message interface {
 	Type() ID
-	Serialize(buf *bytes.Buffer)
-	Deserialize(buf *bytes.Buffer) Message
+	Serializer() serialization.Serializer
+	Deserializer() serialization.Deserializer
 }

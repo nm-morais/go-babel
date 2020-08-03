@@ -1,6 +1,12 @@
-package utils
+package pkg
 
-import . "github.com/DeMMon/go-babel/pkg"
+type Error interface {
+	Fatal() bool
+	Temporary() bool
+	Code() int
+	Reason() string
+	Caller() string
+}
 
 func NonFatalError(code int, reason string, caller string) Error {
 	return &genericErr{

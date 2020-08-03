@@ -1,11 +1,9 @@
 package transport
 
 import (
-	"bytes"
-	"github.com/DeMMon/go-babel/pkg"
-	"github.com/DeMMon/go-babel/pkg/message"
-	"github.com/DeMMon/go-babel/pkg/peer"
-	"github.com/DeMMon/go-babel/pkg/utils"
+	"github.com/nm-morais/DeMMon/go-babel/pkg"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
 	"net"
 )
@@ -16,10 +14,10 @@ type TCPTransport struct {
 	ListenAddr net.Addr
 	conn       net.Conn
 	peer       peer.Peer
-	msgChan    chan message.Message
+	msgChan    chan []byte
 }
 
-func GetTCPListener(listenAddr net.Addr) Transport {
+func NewTCPListener(listenAddr net.Addr) Transport {
 	return &TCPTransport{
 		ListenAddr: listenAddr,
 		conn:       nil,
@@ -27,7 +25,7 @@ func GetTCPListener(listenAddr net.Addr) Transport {
 	}
 }
 
-func GetTCPDialer() Transport {
+func NewTCPDialer() Transport {
 	return &TCPTransport{
 		ListenAddr: nil,
 		conn:       nil,
@@ -61,12 +59,10 @@ func (t *TCPTransport) Listen() <-chan Transport {
 	}
 }
 
-func (t *TCPTransport) SendMessage(msg message.Message) pkg.Error {
-	buf := bytes.NewBuffer(make([]byte, message.MaxMessageBytes))
-	msg.Serialize(buf)
-	_, err := t.conn.Write(buf.Bytes())
+func (t *TCPTransport) SendMessage(msgBytes []byte) pkg.Error {
+	_, err := t.conn.Write(msgBytes)
 	if err != nil {
-		return utils.NonFatalError(500, err.Error(), TCPTransportCaller)
+		return pkg.NonFatalError(500, err.Error(), TCPTransportCaller)
 	}
 	return nil
 }
@@ -76,13 +72,13 @@ func (t *TCPTransport) Dial(peer peer.Peer) <-chan pkg.Error {
 	go func() {
 		addr, err := net.ResolveTCPAddr(peer.Addr().String(), peer.Addr().Network())
 		if err != nil {
-			errChan <- utils.NonFatalError(500, err.Error(), TCPTransportCaller)
+			errChan <- pkg.NonFatalError(500, err.Error(), TCPTransportCaller)
 			close(errChan)
 			return
 		}
 		conn, err := net.DialTCP("tcp", nil, addr)
 		if err != nil {
-			errChan <- utils.NonFatalError(500, err.Error(), TCPTransportCaller)
+			errChan <- pkg.NonFatalError(500, err.Error(), TCPTransportCaller)
 			close(errChan)
 			return
 		}
@@ -95,8 +91,8 @@ func (t *TCPTransport) Dial(peer peer.Peer) <-chan pkg.Error {
 	return errChan
 }
 
-func (t *TCPTransport) PipeToMessageChan() <-chan message.Message {
-	msgChan := make(chan message.Message)
+func (t *TCPTransport) PipeToMessageChan() <-chan []byte {
+	msgChan := make(chan []byte)
 	t.msgChan = msgChan
 	go func() {
 		for {
@@ -107,9 +103,7 @@ func (t *TCPTransport) PipeToMessageChan() <-chan message.Message {
 				close(msgChan)
 				return
 			}
-			msg := &message.GenericMessage{}
-			msg.Deserialize(bytes.NewBuffer(msgBytes[:read]))
-			msgChan <- msg
+			msgChan <- msgBytes[:read]
 		}
 	}()
 	return msgChan
@@ -119,7 +113,7 @@ func (t *TCPTransport) Peer() peer.Peer {
 	return t.peer
 }
 
-func (t *TCPTransport) MessageChan() <-chan message.Message {
+func (t *TCPTransport) MessageChan() <-chan []byte {
 	return t.msgChan
 }
 

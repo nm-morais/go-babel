@@ -1,14 +1,15 @@
 package handlers
 
 import (
-	"github.com/DeMMon/go-babel/pkg/message"
-	"github.com/DeMMon/go-babel/pkg/notification"
-	"github.com/DeMMon/go-babel/pkg/request"
-	"github.com/DeMMon/go-babel/pkg/timer"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/message"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/notification"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/peer"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/request"
+	"github.com/nm-morais/DeMMon/go-babel/pkg/timer"
 )
 
-type MessageHandler func(message message.Message)
 type RequestHandler func(request request.Request) request.Reply
+type MessageHandler func(sender peer.Peer, message message.Message)
 type ReplyHandler func(reply request.Reply)
 type NotificationHandler func(notification notification.Notification)
 type TimerHandler func(timer timer.Timer)
