@@ -1,12 +1,12 @@
 package configs
 
 import (
-	"github.com/DeMMon/go-babel/pkg/utils"
+	"encoding/json"
 	"io/ioutil"
 )
 
 type ProtocolManagerConfig struct {
-	ListenPort int `json:"listen_port"`
+	ListenPort int16 `json:"listen_port"`
 }
 
 func ReadConfigFile(filePath string) ProtocolManagerConfig {
@@ -16,6 +16,8 @@ func ReadConfigFile(filePath string) ProtocolManagerConfig {
 	}
 
 	config := ProtocolManagerConfig{}
-	utils.DeserializeFromJson(data, &config)
+	if err := json.Unmarshal(data, &config); err != nil {
+		panic(err)
+	}
 	return config
 }

@@ -1,9 +1,8 @@
 package timer
 
-import (
-	. "github.com/DeMMon/go-babel/pkg"
-)
+type ID uint16
 
 type Timer interface {
 	ID() ID
+	Wait()
 }

@@ -1,10 +1,13 @@
 package request
 
-import (
-	. "github.com/DeMMon/go-babel/pkg"
-)
+type ID uint16
 
 type Request interface {
 	ID() ID
-	Params() []string
 }
+
+type Reply interface {
+	Request()
+	ID() ID
+}
+

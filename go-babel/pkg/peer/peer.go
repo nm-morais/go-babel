@@ -1,31 +1,23 @@
 package peer
 
 import (
-	"github.com/DeMMon/go-babel/pkg"
 	"net"
 )
 
-type IPeer interface {
-	ID() pkg.ID
+type Peer interface {
 	Addr() net.Addr
 }
 
-type Peer struct {
-	id   pkg.ID
+type peer struct {
 	addr net.Addr
 }
 
-func NewPeer(id pkg.ID, addr net.Addr) *Peer {
-	return &Peer{
-		id:   id,
+func NewPeer(addr net.Addr) Peer {
+	return &peer{
 		addr: addr,
 	}
 }
 
-func (p Peer) ID() pkg.ID {
-	return p.id
-}
-
-func (p Peer) Addr() net.Addr {
-	return p.Addr()
+func (p *peer) Addr() net.Addr {
+	return p.addr
 }

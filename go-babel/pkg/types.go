@@ -1,7 +1,6 @@
 package pkg
 
-type ID = string
-type MessageType = string
+type MessageType = uint64
 
 type Error interface {
 	Fatal() bool
