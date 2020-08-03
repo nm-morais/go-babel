@@ -34,10 +34,10 @@ func (msg ProtoHandshakeMessage) Deserializer() Deserializer {
 }
 
 func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
-	protoMsg := message.(ProtoHandshakeMessage)
+	protoMsg := message.(*ProtoHandshakeMessage)
 	buf := &bytes.Buffer{}
 	writer := io.Writer(buf)
-	if err := binary.Write(writer, binary.BigEndian, protoMsg); err != nil {
+	if err := binary.Write(writer, binary.BigEndian, &protoMsg.Protos); err != nil {
 		panic(err)
 	}
 	return buf.Bytes()
@@ -47,7 +47,7 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(toDeserialize []byte) Mes
 	buf := bytes.NewBuffer(toDeserialize)
 	newMsg := &ProtoHandshakeMessage{}
 	reader := io.Reader(buf)
-	if err := binary.Read(reader, binary.BigEndian, newMsg); err != nil {
+	if err := binary.Read(reader, binary.BigEndian, &newMsg.Protos); err != nil {
 		panic(err)
 	}
 	return newMsg

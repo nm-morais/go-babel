@@ -36,28 +36,33 @@ func NewTCPDialer() Transport {
 
 func (t *TCPTransport) Listen() <-chan Transport {
 	newConnChan := make(chan Transport)
-	l, err := net.Listen("tcp4", t.ListenAddr.String())
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		if err := l.Close(); err != nil {
+	go func() {
+		l, err := net.Listen("tcp4", t.ListenAddr.String())
+		if err != nil {
 			panic(err)
 		}
-	}()
 
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			log.Error(err)
+		defer func() {
+			if err := l.Close(); err != nil {
+				panic(err)
+			}
+		}()
+
+		for {
+			conn, err := l.Accept()
+			log.Infof("Someone dialed me")
+			if err != nil {
+				log.Error(err)
+			}
+			newTransport := &TCPTransport{
+				ListenAddr: nil,
+				conn:       conn,
+				peer:       peer.NewPeer(conn.RemoteAddr()),
+			}
+			newConnChan <- newTransport
 		}
-		newTransport := &TCPTransport{
-			ListenAddr: nil,
-			conn:       conn,
-			peer:       peer.NewPeer(conn.RemoteAddr()),
-		}
-		newConnChan <- newTransport
-	}
+	}()
+	return newConnChan
 }
 
 func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {

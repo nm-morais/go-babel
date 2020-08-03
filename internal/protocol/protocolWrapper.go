@@ -10,6 +10,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/request"
 	"github.com/nm-morais/go-babel/pkg/timer"
+	log "github.com/sirupsen/logrus"
 )
 
 type WrapperProtocol struct {
@@ -119,7 +120,7 @@ func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Re
 // channel handler
 
 func (pw *WrapperProtocol) handleChannels() {
-
+	log.Info("Channel loop started")
 	for {
 		select {
 
@@ -253,10 +254,13 @@ func (pw *WrapperProtocol) ID() protocol.ID {
 }
 
 func (pw *WrapperProtocol) Start() {
+	log.Infof("Wrapper proto starting")
+	go pw.handleChannels()
 	pw.wrappedProtocol.Start()
 }
 
 func (pw *WrapperProtocol) Init() {
+	log.Infof("Wrapper proto initializing")
 	pw.wrappedProtocol.Init()
 }
 

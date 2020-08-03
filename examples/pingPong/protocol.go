@@ -37,15 +37,19 @@ func (m *PingPongProtocol) Init() {
 }
 
 func (m *PingPongProtocol) Start() {
-	if m.self != m.contact {
+
+	if m.self.Addr().String() != m.contact.Addr().String() {
+		log.Infof("Dialing contact node")
 		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
 	} else {
+
 		log.Infof("I'm contact node")
 	}
 }
 
 func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
-	if peer == m.contact {
+	log.Infof("Dial failed")
+	if peer.Addr().String() == m.contact.Addr().String() {
 		panic("contacting bootstrap node failed")
 	}
 }
@@ -86,6 +90,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 }
 
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
+	log.Infof("Connection established to peer %s", peer)
 	if sourceProto == protoID {
 		log.Infof("Dial successful")
 		return true
