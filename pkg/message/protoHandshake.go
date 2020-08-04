@@ -1,21 +1,22 @@
 package message
 
 import (
-	"bytes"
 	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"io"
+	"net"
 )
 
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
 
 type ProtoHandshakeMessage struct {
-	Protos []protocol.ID
+	ListenAddr net.Addr
+	Protos     []protocol.ID
 }
 
-func NewProtoHandshakeMessage(protos []protocol.ID) Message {
-	return &ProtoHandshakeMessage{
-		Protos: protos,
+func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr) Message {
+	return ProtoHandshakeMessage{
+		ListenAddr: listenAddr,
+		Protos:     protos,
 	}
 }
 
@@ -34,21 +35,33 @@ func (msg ProtoHandshakeMessage) Deserializer() Deserializer {
 }
 
 func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
-	protoMsg := message.(*ProtoHandshakeMessage)
-	buf := &bytes.Buffer{}
-	writer := io.Writer(buf)
-	if err := binary.Write(writer, binary.BigEndian, &protoMsg.Protos); err != nil {
-		panic(err)
+	protoMsg := message.(ProtoHandshakeMessage)
+	msgSize := 2*len(protoMsg.Protos) + 2
+	buf := make([]byte, msgSize)
+	binary.BigEndian.PutUint16(buf, uint16(len(protoMsg.Protos)))
+	for i, protoID := range protoMsg.Protos {
+		bufPos := i*2 + 2
+		binary.BigEndian.PutUint16(buf[bufPos:], uint16(protoID))
 	}
-	return buf.Bytes()
+	return append(buf, []byte(protoMsg.ListenAddr.String())...)
+
 }
 
-func (msg ProtoHandshakeMessageSerializer) Deserialize(toDeserialize []byte) Message {
-	buf := bytes.NewBuffer(toDeserialize)
+func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	newMsg := &ProtoHandshakeMessage{}
-	reader := io.Reader(buf)
-	if err := binary.Read(reader, binary.BigEndian, &newMsg.Protos); err != nil {
-		panic(err)
+	nrProtos := binary.BigEndian.Uint16(buf)
+	newMsg.Protos = make([]protocol.ID, nrProtos)
+	bufPos := 0
+	for i := 0; uint16(i) < nrProtos; i++ {
+		bufPos = i*2 + 2
+		newMsg.Protos[i] = protocol.ID(binary.BigEndian.Uint16(buf[bufPos:]))
 	}
-	return newMsg
+	bufPos += 2
+	listenAddrStr := string(buf[bufPos:])
+	listenAddr, err := net.ResolveTCPAddr("tcp4", listenAddrStr)
+	if err != nil {
+		panic("Peer has invalid listen addr")
+	}
+	newMsg.ListenAddr = listenAddr
+	return *newMsg
 }

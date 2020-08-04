@@ -39,7 +39,7 @@ func (m *Manager) RegisterDeserializer(id message.ID, serializer message.Deseria
 }
 
 func (m *Manager) RegisterSerializer(id message.ID, serializer message.Serializer) {
-	m.deserializers.Store(id, serializer)
+	m.serializers.Store(id, serializer)
 }
 
 func (m *Manager) Deserialize(id message.ID, bytes []byte) message.Message {

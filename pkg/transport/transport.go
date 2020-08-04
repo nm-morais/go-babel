@@ -9,7 +9,7 @@ type Transport interface {
 	Listen() <-chan Transport
 	Peer() peer.Peer
 	Dial(peer peer.Peer) <-chan errors.Error
-	PipeToMessageChan() <-chan []byte
+	PipeBytesToChan() <-chan []byte
 	MessageChan() <-chan []byte
 	SendMessage(message []byte) errors.Error
 	Close()

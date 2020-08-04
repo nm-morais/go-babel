@@ -1,10 +1,7 @@
 package pingPong
 
 import (
-	"bytes"
-	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/message"
-	"io"
 )
 
 const PingMessageType message.ID = 1001
@@ -32,23 +29,12 @@ func (msg Ping) Deserializer() message.Deserializer {
 }
 
 func (PingSerializer) Serialize(message message.Message) []byte {
-	protoMsg := message.(Ping)
-	buf := &bytes.Buffer{}
-	writer := io.Writer(buf)
-	if err := binary.Write(writer, binary.BigEndian, protoMsg); err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
+	return []byte(message.(Ping).Payload)
+
 }
 
 func (PingSerializer) Deserialize(toDeserialize []byte) message.Message {
-	buf := bytes.NewBuffer(toDeserialize)
-	newMsg := &Ping{}
-	reader := io.Reader(buf)
-	if err := binary.Read(reader, binary.BigEndian, newMsg); err != nil {
-		panic(err)
-	}
-	return newMsg
+	return Ping{string(toDeserialize)}
 }
 
 type Pong struct {
@@ -73,21 +59,9 @@ func (msg Pong) Deserializer() message.Deserializer {
 }
 
 func (PongSerializer) Serialize(message message.Message) []byte {
-	protoMsg := message.(Pong)
-	buf := &bytes.Buffer{}
-	writer := io.Writer(buf)
-	if err := binary.Write(writer, binary.BigEndian, protoMsg); err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
+	return []byte(message.(Pong).Payload)
 }
 
 func (PongSerializer) Deserialize(toDeserialize []byte) message.Message {
-	buf := bytes.NewBuffer(toDeserialize)
-	newMsg := &Pong{}
-	reader := io.Reader(buf)
-	if err := binary.Read(reader, binary.BigEndian, newMsg); err != nil {
-		panic(err)
-	}
-	return newMsg
+	return Pong{Payload: string(toDeserialize)}
 }

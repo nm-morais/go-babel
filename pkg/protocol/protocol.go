@@ -2,7 +2,7 @@ package protocol
 
 import "github.com/nm-morais/go-babel/pkg/peer"
 
-type ID uint16
+type ID = uint16
 
 type Protocol interface {
 	ID() ID
@@ -13,9 +13,6 @@ type Protocol interface {
 	InConnRequested(peer peer.Peer) bool             // if true, will subscribe protocol to connectionEvents
 	DialSuccess(sourceProto ID, peer peer.Peer) bool // if true, will subscribe protocol to connectionEvents
 
-	ConnEstablished(peer peer.Peer)
-
 	DialFailed(peer peer.Peer)
-
 	PeerDown(peer peer.Peer)
 }

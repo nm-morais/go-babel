@@ -1,6 +1,6 @@
 package message
 
-type ID uint16
+type ID = uint16
 
 type Deserializer interface {
 	Deserialize(bytes []byte) Message

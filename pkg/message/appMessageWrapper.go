@@ -1,10 +1,8 @@
 package message
 
 import (
-	"bytes"
 	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"io"
 )
 
 var appMessageWrapperSerializer = AppMessageWrapperSerializer{}
@@ -42,35 +40,32 @@ func (msg *AppMessageWrapper) Deserializer() Deserializer {
 type AppMessageWrapperSerializer struct{}
 
 func (serializer AppMessageWrapperSerializer) Serialize(toSerialize Message) []byte {
-	wrappedMsg := toSerialize.(*AppMessageWrapper)
-	buf := &bytes.Buffer{}
-	writer := io.Writer(buf)
-	if err := binary.Write(writer, binary.BigEndian, wrappedMsg.MessageID); err != nil {
-		panic(err)
+	wrapperMsg := toSerialize.(*AppMessageWrapper)
+	msgSize := 0
+	msgSize += 2 + 2 + 2 + 2*len(wrapperMsg.DestProtos)
+	buf := make([]byte, msgSize)
+	binary.BigEndian.PutUint16(buf, wrapperMsg.MessageID)
+	binary.BigEndian.PutUint16(buf[2:], wrapperMsg.SourceProto)
+	binary.BigEndian.PutUint16(buf[4:], uint16(len(wrapperMsg.DestProtos)))
+	bufPos := 6
+	for _, protoID := range wrapperMsg.DestProtos {
+		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
+		bufPos += 2
 	}
-	if err := binary.Write(writer, binary.BigEndian, wrappedMsg.SourceProto); err != nil {
-		panic(err)
-	}
-	if err := binary.Write(writer, binary.BigEndian, wrappedMsg.DestProtos); err != nil {
-		panic(err)
-	}
-	buf.Write(wrappedMsg.WrappedMsgBytes)
-	return buf.Bytes()
+	return append(buf, wrapperMsg.WrappedMsgBytes...)
 }
 
-func (serializer AppMessageWrapperSerializer) Deserialize(toDeserialize []byte) Message {
-	buf := bytes.NewBuffer(toDeserialize)
-	reader := io.Reader(buf)
+func (serializer AppMessageWrapperSerializer) Deserialize(buf []byte) Message {
 	msg := &AppMessageWrapper{}
-	if err := binary.Read(reader, binary.BigEndian, msg.MessageID); err != nil {
-		panic(err)
+	msg.MessageID = binary.BigEndian.Uint16(buf)
+	msg.SourceProto = binary.BigEndian.Uint16(buf[2:])
+	nrProtos := int(binary.BigEndian.Uint16(buf[4:]))
+	msg.DestProtos = make([]protocol.ID, nrProtos)
+	bufPos := 6
+	for i := 0; i < nrProtos; i++ {
+		msg.DestProtos[i] = binary.BigEndian.Uint16(buf[bufPos:])
+		bufPos += 2
 	}
-	if err := binary.Read(reader, binary.BigEndian, msg.SourceProto); err != nil {
-		panic(err)
-	}
-	if err := binary.Read(reader, binary.BigEndian, msg.DestProtos); err != nil {
-		panic(err)
-	}
-	msg.WrappedMsgBytes = buf.Bytes()
+	msg.WrappedMsgBytes = buf[bufPos:]
 	return msg
 }

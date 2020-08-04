@@ -14,35 +14,32 @@ import (
 const protoID = 1000
 
 type PingPongProtocol struct {
-	activePeers map[peer.Peer]interface{}
+	activePeers map[peer.Peer]bool
 	contact     peer.Peer
-	self        peer.Peer
 }
 
 func (m *PingPongProtocol) ID() protocol.ID {
 	return protoID
 }
 
-func NewPingPongProtocol(contact peer.Peer, self peer.Peer) protocol.Protocol {
+func NewPingPongProtocol(contact peer.Peer) protocol.Protocol {
 	return &PingPongProtocol{
 		contact: contact,
-		self:    self,
 	}
 }
 
 func (m *PingPongProtocol) Init() {
+	m.activePeers = make(map[peer.Peer]bool)
 	pkg.RegisterMessageHandler(protoID, Ping{}, m.handlePingMessage)
 	pkg.RegisterMessageHandler(protoID, Pong{}, m.handlePongMessage)
 	pkg.RegisterTimerHandler(protoID, PingTimer{}.ID(), m.handlePingTimer)
 }
 
 func (m *PingPongProtocol) Start() {
-
-	if m.self.Addr().String() != m.contact.Addr().String() {
+	if pkg.Addr().String() != m.contact.Addr().String() {
 		log.Infof("Dialing contact node")
 		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
 	} else {
-
 		log.Infof("I'm contact node")
 	}
 }
@@ -55,34 +52,31 @@ func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
 }
 
 func (m *PingPongProtocol) PeerDown(peer peer.Peer) {
-	if peer == m.contact {
-		panic("bootstrap node failed")
-	}
+	delete(m.activePeers, peer)
 }
 
 func (m *PingPongProtocol) handlePingMessage(sender peer.Peer, msg message.Message) {
 	pingMsg := msg.(Ping)
-	log.Info("Got ping message, content : %s", pingMsg.Payload)
-
+	log.Infof("Got ping message, content : %s", pingMsg.Payload)
 	response := Pong{Payload: pingMsg.Payload + "Pong"}
+	log.Infof("Sending Pong message, content : %s", response.Payload)
 	pkg.SendMessage(response, sender, protoID, []protocol.ID{protoID})
 }
 
 func (m *PingPongProtocol) handlePongMessage(sender peer.Peer, msg message.Message) {
 	pongMsg := msg.(Pong)
-	log.Info("Got pong message, content : %s", pongMsg.Payload)
+	log.Infof("Got pong message, content : %s", pongMsg.Payload)
 }
 
 func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
-	log.Info("ping timer trigger")
-	log.Infof("Sending pingMessage")
+	//log.Infof("ping timer trigger")
 	pingMsg := Ping{Payload: "Ping"}
-
 	if len(m.activePeers) == 0 {
 		log.Infof("No active peers on ping timer")
 	}
 
 	for remotePeer := range m.activePeers {
+		log.Infof("Sending pingMessage to %s", remotePeer.Addr().String())
 		pkg.SendMessage(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 	}
 
@@ -90,9 +84,11 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 }
 
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	log.Infof("Connection established to peer %s", peer)
+	log.Infof("Connection established to peer %+v", peer.Addr().String())
 	if sourceProto == protoID {
 		log.Infof("Dial successful")
+		m.activePeers[peer] = true
+		pkg.RegisterTimer(protoID, PingTimer{timer: time.NewTimer(0 * time.Second)})
 		return true
 	}
 	return false
@@ -100,8 +96,4 @@ func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) 
 
 func (m *PingPongProtocol) InConnRequested(peer peer.Peer) bool {
 	return true
-}
-
-func (m *PingPongProtocol) ConnEstablished(peer peer.Peer) {
-	log.Infof("Connection established to peer %s", peer)
 }

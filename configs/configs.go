@@ -3,13 +3,15 @@ package configs
 import (
 	"encoding/json"
 	"io/ioutil"
+	"net"
 )
 
 type ProtocolManagerConfig struct {
-	ListenPort int16 `json:"listen_port"`
+	ListenAddr net.Addr
 }
 
-func ReadConfigFile(filePath string) ProtocolManagerConfig {
+func ReadConfigFromFile(filePath string) ProtocolManagerConfig {
+	//TODO
 	data, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		panic(err)

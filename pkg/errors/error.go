@@ -1,11 +1,14 @@
 package errors
 
+import log "github.com/sirupsen/logrus"
+
 type Error interface {
 	Fatal() bool
 	Temporary() bool
 	Code() int
 	Reason() string
 	Caller() string
+	Log()
 }
 
 func NonFatalError(code int, reason string, caller string) Error {
@@ -46,6 +49,10 @@ type genericErr struct {
 	caller    string
 }
 
+func (err *genericErr) Log() {
+	log.Errorf("[%s]: Error type: %d, Reason: %s", err.Caller(), err.Code(), err.Reason())
+}
+
 func (err *genericErr) Fatal() bool {
 	return err.fatal
 }
@@ -59,9 +66,9 @@ func (err *genericErr) Code() int {
 }
 
 func (err *genericErr) Caller() string {
-	return err.Caller()
+	return err.caller
 }
 
 func (err *genericErr) Reason() string {
-	return err.Caller()
+	return err.reason
 }

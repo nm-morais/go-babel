@@ -33,7 +33,6 @@ type WrapperProtocol struct {
 
 	dialSuccess     chan dialSuccessWithBoolReplyChan
 	inConnRequested chan inConnReqEventWithBoolReply
-	connEstablished chan peer.Peer
 	dialFailed      chan peer.Peer
 	connDown        chan peer.Peer
 }
@@ -81,7 +80,6 @@ func NewWrapperProtocol(protocol protocol.Protocol) *WrapperProtocol {
 		// transport event channels
 		dialFailed:      make(chan peer.Peer, ChannelSize),
 		connDown:        make(chan peer.Peer, ChannelSize),
-		connEstablished: make(chan peer.Peer, ChannelSize),
 		dialSuccess:     make(chan dialSuccessWithBoolReplyChan, ChannelSize), // interactive channel
 		inConnRequested: make(chan inConnReqEventWithBoolReply, ChannelSize),  // interactive channel
 	}
@@ -125,8 +123,6 @@ func (pw *WrapperProtocol) handleChannels() {
 		select {
 
 		// net events
-		case peerUp := <-pw.connEstablished:
-			pw.wrappedProtocol.ConnEstablished(peerUp)
 		case event := <-pw.inConnRequested:
 			event.respChan <- pw.wrappedProtocol.InConnRequested(event.peer)
 		case event := <-pw.dialSuccess:
@@ -283,10 +279,6 @@ func (pw *WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) 
 	pw.dialSuccess <- event
 	reply := <-event.respChan
 	return reply
-}
-
-func (pw *WrapperProtocol) InnConnEstablished(peer peer.Peer) {
-	pw.connEstablished <- peer
 }
 
 func (pw *WrapperProtocol) DialFailed(peer peer.Peer) {

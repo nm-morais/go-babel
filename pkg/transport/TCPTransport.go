@@ -68,7 +68,7 @@ func (t *TCPTransport) Listen() <-chan Transport {
 func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 	_, err := t.conn.Write(msgBytes)
 	if err != nil {
-		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
+		return errors.FatalError(500, err.Error(), TCPTransportCaller)
 	}
 	return nil
 }
@@ -76,13 +76,13 @@ func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 func (t *TCPTransport) Dial(peer peer.Peer) <-chan errors.Error {
 	errChan := make(chan errors.Error)
 	go func() {
-		addr, err := net.ResolveTCPAddr(peer.Addr().String(), peer.Addr().Network())
+		addr, err := net.ResolveTCPAddr("tcp4", peer.Addr().String())
 		if err != nil {
 			errChan <- errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 			close(errChan)
 			return
 		}
-		conn, err := net.DialTCP("tcp", nil, addr)
+		conn, err := net.DialTCP("tcp4", nil, addr)
 		if err != nil {
 			errChan <- errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 			close(errChan)
@@ -97,15 +97,17 @@ func (t *TCPTransport) Dial(peer peer.Peer) <-chan errors.Error {
 	return errChan
 }
 
-func (t *TCPTransport) PipeToMessageChan() <-chan []byte {
+func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 	msgChan := make(chan []byte)
 	t.msgChan = msgChan
+	log.Info("Routine piping messages to chan has started")
 	go func() {
 		for {
 			msgBytes := make([]byte, MaxMessageBytes)
 			read, err := t.conn.Read(msgBytes)
 			if err != nil {
-				log.Error(err)
+
+				log.Error("Routine piping messages to chan has exited due to:", err)
 				close(msgChan)
 				return
 			}
