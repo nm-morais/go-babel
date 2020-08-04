@@ -7,7 +7,6 @@ import (
 
 type Transport interface {
 	Listen() <-chan Transport
-	Peer() peer.Peer
 	Dial(peer peer.Peer) <-chan errors.Error
 	PipeBytesToChan() <-chan []byte
 	MessageChan() <-chan []byte

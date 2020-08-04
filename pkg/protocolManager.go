@@ -84,12 +84,18 @@ func InitProtoManager(configs configs.ProtocolManagerConfig) *protoManager {
 	return p
 }
 
-func StartTransportListener() {
+func handleTransportListener() {
 	transports := p.listener.Listen()
 	for newPeerTransport := range transports {
 		go newPeerTransport.PipeBytesToChan()
-		handshakeMsg := exchangeHandshakeMessage(newPeerTransport, p.protoIds)
+		handshakeMsg := exchangeHandshakeMessage(newPeerTransport, p.protoIds, true)
 		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
+
+		if handshakeMsg.TemporaryConn == 1 {
+			go handleMsgTmpTransport(remotePeer, newPeerTransport)
+			continue
+		}
+
 		p.activeTransports.Store(remotePeer, newPeerTransport)
 		for _, remoteProtoID := range handshakeMsg.Protos {
 			if proto, ok := p.protocols.Load(remoteProtoID); ok {
@@ -105,7 +111,6 @@ func StartTransportListener() {
 				p.channelSubscribersMutex.Unlock()
 			}
 		}
-
 		go handlePeerConn(remotePeer, newPeerTransport.MessageChan())
 	}
 }
@@ -179,7 +184,10 @@ func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID,
 		// log.Infof("Sending: %+v", wrapper)
 		toSendBytes := wrapper.Serializer().Serialize(wrapper)
 		// log.Infof("Sending (bytes): %+v", toSendBytes)
-		conn.(transport.Transport).SendMessage(toSendBytes)
+		err := conn.(transport.Transport).SendMessage(toSendBytes)
+		if err != nil {
+			err.Log()
+		}
 	}()
 
 	return nil
@@ -235,6 +243,41 @@ func RegisterTimer(origin protocol.ID, timer timer.Timer) errors.Error {
 
 func RegisteredProtos() []protocol.ID {
 	return p.protoIds
+}
+
+func SendMessageTempTransport(targetPeer peer.Peer, toSend message.Message, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Transport) {
+	errChan := t.Dial(targetPeer)
+	_ = exchangeHandshakeMessage(t, []protocol.ID{}, true)
+	go func() {
+		err := <-errChan
+		if err != nil {
+			log.Error("Side channel dial failed")
+		}
+		msgBytes := toSend.Serializer().Serialize(toSend)
+		msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
+		t.SendMessage(msgWrapper.Serializer().Serialize(msgWrapper))
+		t.Close()
+	}()
+}
+
+func handleMsgTmpTransport(newPeer peer.Peer, transport transport.Transport) {
+	deserializer := message.AppMessageWrapperSerializer{}
+	msgChan := transport.PipeBytesToChan()
+	msg, ok := <-msgChan
+	if !ok {
+		return
+	}
+	deserialized := deserializer.Deserialize(msg)
+	protoMsg := deserialized.(*message.AppMessageWrapper)
+	for _, toNotifyID := range protoMsg.DestProtos {
+		if toNotify, ok := p.protocols.Load(toNotifyID); ok {
+			appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
+			toNotify.(protocolValueType).DeliverMessage(newPeer, appMsg)
+		} else {
+			log.Infof("Ignored message: %+v", protoMsg)
+		}
+	}
+	transport.Close()
 }
 
 func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) errors.Error {
@@ -296,7 +339,7 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 		go t.PipeBytesToChan()
 		log.Infof("Done dialing node %s", toDial.Addr())
 		log.Infof("Exchanging protos")
-		handshakeMsg := exchangeHandshakeMessage(t, p.protoIds)
+		handshakeMsg := exchangeHandshakeMessage(t, p.protoIds, false)
 		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
 		log.Infof("Done exchanging protos")
 		p.activeTransports.Store(remotePeer, t)
@@ -376,8 +419,12 @@ func Disconnect(source protocol.ID, peer peer.Peer) {
 	p.channelSubscribersMutex.Unlock()
 }
 
-func exchangeHandshakeMessage(transport transport.Transport, selfProtos []protocol.ID) message.ProtoHandshakeMessage {
-	var toSend = message.NewProtoHandshakeMessage(selfProtos, p.config.ListenAddr)
+func exchangeHandshakeMessage(transport transport.Transport, selfProtos []protocol.ID, tempChan bool) message.ProtoHandshakeMessage {
+	var tempChanUint8 uint8 = 0
+	if tempChan == true {
+		tempChanUint8 = 1
+	}
+	var toSend = message.NewProtoHandshakeMessage(selfProtos, p.config.ListenAddr, tempChanUint8)
 	log.Infof("Sending proto exchange message %+v", toSend)
 	transport.SendMessage(protoMsgSerializer.Serialize(toSend))
 	msgChan := transport.MessageChan()
@@ -399,7 +446,7 @@ func Start() {
 		return true
 	})
 
-	go StartTransportListener()
+	go handleTransportListener()
 
 	p.protocols.Range(func(_, proto interface{}) bool {
 		go proto.(protocolValueType).Start()

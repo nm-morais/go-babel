@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	. "github.com/nm-morais/go-babel/configs"
+	"github.com/nm-morais/go-babel/examples/heartbeat"
 	"github.com/nm-morais/go-babel/examples/pingPong"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
@@ -34,6 +35,7 @@ func main() {
 		panic(err)
 	}
 
+	pkg.RegisterProtocol(&heartbeat.Heartbeat{})
 	pkg.RegisterProtocol(pingPong.NewPingPongProtocol(peer.NewPeer(contactNodeAddr)))
 	pkg.Start()
 }

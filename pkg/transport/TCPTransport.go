@@ -53,6 +53,7 @@ func (t *TCPTransport) Listen() <-chan Transport {
 			log.Infof("Someone dialed me")
 			if err != nil {
 				log.Error(err)
+				continue
 			}
 			newTransport := &TCPTransport{
 				ListenAddr: nil,
@@ -106,7 +107,6 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 			msgBytes := make([]byte, MaxMessageBytes)
 			read, err := t.conn.Read(msgBytes)
 			if err != nil {
-
 				log.Error("Routine piping messages to chan has exited due to:", err)
 				close(msgChan)
 				return
@@ -115,10 +115,6 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 		}
 	}()
 	return msgChan
-}
-
-func (t *TCPTransport) Peer() peer.Peer {
-	return t.peer
 }
 
 func (t *TCPTransport) MessageChan() <-chan []byte {

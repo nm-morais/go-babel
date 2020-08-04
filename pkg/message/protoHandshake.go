@@ -9,14 +9,16 @@ import (
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
 
 type ProtoHandshakeMessage struct {
-	ListenAddr net.Addr
-	Protos     []protocol.ID
+	TemporaryConn uint8
+	ListenAddr    net.Addr
+	Protos        []protocol.ID
 }
 
-func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr) Message {
+func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr, temporaryConn uint8) Message {
 	return ProtoHandshakeMessage{
-		ListenAddr: listenAddr,
-		Protos:     protos,
+		ListenAddr:    listenAddr,
+		Protos:        protos,
+		TemporaryConn: temporaryConn,
 	}
 }
 
@@ -36,27 +38,30 @@ func (msg ProtoHandshakeMessage) Deserializer() Deserializer {
 
 func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 	protoMsg := message.(ProtoHandshakeMessage)
-	msgSize := 2*len(protoMsg.Protos) + 2
+	msgSize := 2*len(protoMsg.Protos) + 3
 	buf := make([]byte, msgSize)
+	bufPos := 0
+	buf[0] = protoMsg.TemporaryConn
+	bufPos++
 	binary.BigEndian.PutUint16(buf, uint16(len(protoMsg.Protos)))
-	for i, protoID := range protoMsg.Protos {
-		bufPos := i*2 + 2
-		binary.BigEndian.PutUint16(buf[bufPos:], uint16(protoID))
+	for _, protoID := range protoMsg.Protos {
+		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
+		bufPos += 2
 	}
 	return append(buf, []byte(protoMsg.ListenAddr.String())...)
-
 }
 
 func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	newMsg := &ProtoHandshakeMessage{}
-	nrProtos := binary.BigEndian.Uint16(buf)
-	newMsg.Protos = make([]protocol.ID, nrProtos)
 	bufPos := 0
+	newMsg.TemporaryConn = buf[0]
+	bufPos++
+	nrProtos := binary.BigEndian.Uint16(buf[bufPos:])
+	newMsg.Protos = make([]protocol.ID, nrProtos)
 	for i := 0; uint16(i) < nrProtos; i++ {
-		bufPos = i*2 + 2
-		newMsg.Protos[i] = protocol.ID(binary.BigEndian.Uint16(buf[bufPos:]))
+		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])
+		bufPos += 2
 	}
-	bufPos += 2
 	listenAddrStr := string(buf[bufPos:])
 	listenAddr, err := net.ResolveTCPAddr("tcp4", listenAddrStr)
 	if err != nil {
