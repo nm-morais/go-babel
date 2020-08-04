@@ -30,13 +30,10 @@ type IProtocolManager interface {
 	RegisterProtocol(protocol protocol.Protocol) Error
 	RegisterRequestHandler(protocol protocol.ID, request request.ID, handler handlers.RequestHandler) Error
 	RegisterMessageHandler(protocol protocol.ID, request message.ID, handler handlers.MessageHandler) Error
-
 	ReceiveMessage(message message.Message, peer peer.Peer)
 	SendMessage(message message.Message, peer peer.Peer, origin protocol.ID, destinations []protocol.ID) Error
 	SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) Error
-
 	Dial(peer peer.Peer, sourceProto protocol.ID, transport transport.Transport) Error
-
 	dialFailed(peer peer.Peer, sourceProto protocol.ID)
 	dialSuccess(peer peer.Peer, sourceProto protocol.ID)
 	inConnRequested(peerProtos []protocol.ID, peer peer.Peer, transport transport.Transport) bool
@@ -88,11 +85,12 @@ func handleTransportListener() {
 	transports := p.listener.Listen()
 	for newPeerTransport := range transports {
 		go newPeerTransport.PipeBytesToChan()
+
 		handshakeMsg := exchangeHandshakeMessage(newPeerTransport, p.protoIds, true)
 		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
 
 		if handshakeMsg.TemporaryConn == 1 {
-			go handleMsgTmpTransport(remotePeer, newPeerTransport)
+			go handleIncTmpTransport(remotePeer, newPeerTransport)
 			continue
 		}
 
@@ -245,28 +243,35 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func SendMessageTempTransport(targetPeer peer.Peer, toSend message.Message, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Transport) {
+func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Transport) {
 	errChan := t.Dial(targetPeer)
-	_ = exchangeHandshakeMessage(t, []protocol.ID{}, true)
 	go func() {
 		err := <-errChan
 		if err != nil {
 			log.Error("Side channel dial failed")
+			log.Error(err)
+			return
 		}
+		go t.PipeBytesToChan()
+		_ = exchangeHandshakeMessage(t, []protocol.ID{}, true)
 		msgBytes := toSend.Serializer().Serialize(toSend)
 		msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
+		log.Info("Sending message sideChannel")
 		t.SendMessage(msgWrapper.Serializer().Serialize(msgWrapper))
 		t.Close()
 	}()
 }
 
-func handleMsgTmpTransport(newPeer peer.Peer, transport transport.Transport) {
+func handleIncTmpTransport(newPeer peer.Peer, transport transport.Transport) {
 	deserializer := message.AppMessageWrapperSerializer{}
-	msgChan := transport.PipeBytesToChan()
+	msgChan := transport.MessageChan()
+	log.Info("Waiting for message on temp channel...")
 	msg, ok := <-msgChan
 	if !ok {
+		log.Error("temporary conn exited before receiving applicational message")
 		return
 	}
+	log.Info("received message via temp channel")
 	deserialized := deserializer.Deserialize(msg)
 	protoMsg := deserialized.(*message.AppMessageWrapper)
 	for _, toNotifyID := range protoMsg.DestProtos {
@@ -274,7 +279,7 @@ func handleMsgTmpTransport(newPeer peer.Peer, transport transport.Transport) {
 			appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
 			toNotify.(protocolValueType).DeliverMessage(newPeer, appMsg)
 		} else {
-			log.Infof("Ignored message: %+v", protoMsg)
+			log.Errorf("Ignored message: %+v", protoMsg)
 		}
 	}
 	transport.Close()

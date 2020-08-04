@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
@@ -12,7 +13,6 @@ const TCPTransportCaller = "TCPTransportCaller"
 type TCPTransport struct {
 	ListenAddr net.Addr
 	conn       net.Conn
-	peer       peer.Peer
 	msgChan    chan []byte
 }
 
@@ -22,7 +22,7 @@ func NewTCPListener(listenAddr net.Addr) Transport {
 	return &TCPTransport{
 		ListenAddr: listenAddr,
 		conn:       nil,
-		peer:       nil,
+		msgChan:    make(chan []byte),
 	}
 }
 
@@ -30,7 +30,7 @@ func NewTCPDialer() Transport {
 	return &TCPTransport{
 		ListenAddr: nil,
 		conn:       nil,
-		peer:       nil,
+		msgChan:    make(chan []byte),
 	}
 }
 
@@ -58,7 +58,7 @@ func (t *TCPTransport) Listen() <-chan Transport {
 			newTransport := &TCPTransport{
 				ListenAddr: nil,
 				conn:       conn,
-				peer:       peer.NewPeer(conn.RemoteAddr()),
+				msgChan:    make(chan []byte),
 			}
 			newConnChan <- newTransport
 		}
@@ -67,11 +67,49 @@ func (t *TCPTransport) Listen() <-chan Transport {
 }
 
 func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
-	_, err := t.conn.Write(msgBytes)
+	msgSizeBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(msgBytes)))
+	_, err := t.conn.Write(append(msgSizeBytes, msgBytes...))
 	if err != nil {
 		return errors.FatalError(500, err.Error(), TCPTransportCaller)
 	}
 	return nil
+}
+
+func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
+	log.Info("Routine piping messages to chan has started")
+	go func() {
+		for {
+			var lenBytes []byte
+			for toRead := 4; toRead > 0; {
+				lenBytesTmp := make([]byte, toRead)
+				read, err := t.conn.Read(lenBytesTmp)
+				if err != nil {
+					log.Error("Routine piping messages to chan has exited due to:", err)
+					close(t.msgChan)
+					return
+				}
+				toRead -= read
+				lenBytes = append(lenBytes, lenBytesTmp[:read]...)
+			}
+			var msgBytes []byte
+			msgSize := int(binary.BigEndian.Uint32(lenBytes))
+			log.Info("Message size: ", msgSize)
+			for toRead := msgSize; toRead > 0; {
+				msgBytesTmp := make([]byte, toRead)
+				read, err := t.conn.Read(msgBytesTmp)
+				if err != nil {
+					log.Error("Routine piping messages to chan has exited due to:", err)
+					close(t.msgChan)
+					return
+				}
+				toRead -= read
+				msgBytes = append(msgBytes, msgBytesTmp[:read]...)
+			}
+			t.msgChan <- msgBytes
+		}
+	}()
+	return t.msgChan
 }
 
 func (t *TCPTransport) Dial(peer peer.Peer) <-chan errors.Error {
@@ -94,27 +132,7 @@ func (t *TCPTransport) Dial(peer peer.Peer) <-chan errors.Error {
 		close(errChan)
 		return
 	}()
-
 	return errChan
-}
-
-func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
-	msgChan := make(chan []byte)
-	t.msgChan = msgChan
-	log.Info("Routine piping messages to chan has started")
-	go func() {
-		for {
-			msgBytes := make([]byte, MaxMessageBytes)
-			read, err := t.conn.Read(msgBytes)
-			if err != nil {
-				log.Error("Routine piping messages to chan has exited due to:", err)
-				close(msgChan)
-				return
-			}
-			msgChan <- msgBytes[:read]
-		}
-	}()
-	return msgChan
 }
 
 func (t *TCPTransport) MessageChan() <-chan []byte {

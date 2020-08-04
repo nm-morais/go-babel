@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	log "github.com/sirupsen/logrus"
 	"net"
 )
 
@@ -43,7 +44,8 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 	bufPos := 0
 	buf[0] = protoMsg.TemporaryConn
 	bufPos++
-	binary.BigEndian.PutUint16(buf, uint16(len(protoMsg.Protos)))
+	binary.BigEndian.PutUint16(buf[bufPos:], uint16(len(protoMsg.Protos)))
+	bufPos += 2
 	for _, protoID := range protoMsg.Protos {
 		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
 		bufPos += 2
@@ -57,6 +59,7 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	newMsg.TemporaryConn = buf[0]
 	bufPos++
 	nrProtos := binary.BigEndian.Uint16(buf[bufPos:])
+	bufPos += 2
 	newMsg.Protos = make([]protocol.ID, nrProtos)
 	for i := 0; uint16(i) < nrProtos; i++ {
 		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])
@@ -65,6 +68,7 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	listenAddrStr := string(buf[bufPos:])
 	listenAddr, err := net.ResolveTCPAddr("tcp4", listenAddrStr)
 	if err != nil {
+		log.Errorf("Message %s has invalid format", string(buf))
 		panic("Peer has invalid listen addr")
 	}
 	newMsg.ListenAddr = listenAddr

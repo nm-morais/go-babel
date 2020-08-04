@@ -6,7 +6,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	log "github.com/sirupsen/logrus"
 	"time"
 )
 
@@ -37,7 +36,7 @@ func (m *Heartbeat) PeerDown(peer peer.Peer) {
 }
 
 func (m *Heartbeat) handleHeartbeat(sender peer.Peer, msg message.Message) {
-	log.Infof("Got heartbeat from %s", sender.Addr().String())
+	//log.Infof("Got heartbeat from %s", sender.Addr().String())
 }
 
 func (m *Heartbeat) handleHeartbeatTimer(timer timer.Timer) {
@@ -45,7 +44,7 @@ func (m *Heartbeat) handleHeartbeatTimer(timer timer.Timer) {
 	m.timerActive = false
 	hbMsg := HeartbeatMessage{}
 	for remotePeer := range m.activePeers {
-		log.Infof("Sending heartbeat to %s", remotePeer.Addr().String())
+		//log.Infof("Sending heartbeat to %s", remotePeer.Addr().String())
 		pkg.SendMessage(hbMsg, remotePeer, protoID, []protocol.ID{protoID})
 	}
 	if len(m.activePeers) > 0 && !m.timerActive {
@@ -55,7 +54,7 @@ func (m *Heartbeat) handleHeartbeatTimer(timer timer.Timer) {
 }
 
 func (m *Heartbeat) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	log.Infof("Connection established to peer %+v", peer.Addr().String())
+	//log.Infof("Connection established to peer %+v", peer.Addr().String())
 	m.activePeers[peer] = true
 	if len(m.activePeers) > 0 && !m.timerActive {
 		pkg.RegisterTimer(protoID, HeartbeatTimer{timer: time.NewTimer(0 * time.Second)})
