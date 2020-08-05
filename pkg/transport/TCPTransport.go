@@ -5,6 +5,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
+	"io"
 	"net"
 )
 
@@ -86,7 +87,10 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 			msgBytes := make([]byte, MaxMessageBytes)
 			read, err := t.conn.Read(msgBytes)
 			if err != nil {
-				log.Warn("Routine piping messages to chan has exited due to:", err)
+				if err == io.EOF {
+					log.Info("Routine exited because remote peer closed")
+				}
+				log.Info("Routine piping messages to chan has exited due to:", err)
 				close(t.msgChan)
 				return
 			}
@@ -107,20 +111,20 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 			bufPos := 0
 			for bufPos < read {
 				if bufPos != 0 {
-					log.Info("Processing remaining bytes of message")
+					//log.Warn("Processing remaining bytes of message")
 				}
 				msgSize := int(binary.BigEndian.Uint32(msgBytes[bufPos : bufPos+4]))
 				bufPos += 4
-				log.Info("read: ", read)
-				log.Info("msgSize: ", msgSize)
-				log.Info("bufPos: ", bufPos)
+				//log.Info("read: ", read)
+				//log.Info("msgSize: ", msgSize)
+				//log.Info("bufPos: ", bufPos)
 				if bufPos+msgSize <= read {
-					log.Info("Piping message: ", string(msgBytes[bufPos:bufPos+msgSize]))
+					//log.Info("Piping message: ", string(msgBytes[bufPos:bufPos+msgSize]))
 					t.msgChan <- msgBytes[bufPos : bufPos+msgSize]
 					bufPos += msgSize
 
 					if bufPos == read {
-						log.Info("Base case, read entire buffer, going to start")
+						//log.Info("Base case, read entire buffer, going to start")
 						continue READ_START
 					}
 					if read-bufPos < 4 {
