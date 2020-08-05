@@ -39,7 +39,7 @@ func (msg ProtoHandshakeMessage) Deserializer() Deserializer {
 
 func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 	protoMsg := message.(ProtoHandshakeMessage)
-	msgSize := 2*len(protoMsg.Protos) + 3
+	msgSize := 2*len(protoMsg.Protos) + 2 + 1
 	buf := make([]byte, msgSize)
 	bufPos := 0
 	buf[0] = protoMsg.TemporaryConn
@@ -50,7 +50,9 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
 		bufPos += 2
 	}
-	return append(buf, []byte(protoMsg.ListenAddr.String())...)
+	toSend := append(buf, []byte(protoMsg.ListenAddr.String())...)
+	log.Info("serialized handshake message size: ", len(toSend))
+	return toSend
 }
 
 func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
@@ -60,6 +62,7 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	bufPos++
 	nrProtos := binary.BigEndian.Uint16(buf[bufPos:])
 	bufPos += 2
+	log.Info("nrProtos: ", nrProtos)
 	newMsg.Protos = make([]protocol.ID, nrProtos)
 	for i := 0; uint16(i) < nrProtos; i++ {
 		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])

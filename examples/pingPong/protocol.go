@@ -60,7 +60,7 @@ func (m *PingPongProtocol) handlePingMessage(sender peer.Peer, msg message.Messa
 	log.Infof("Got ping message, content : %s", pingMsg.Payload)
 	response := Pong{Payload: pingMsg.Payload + "Pong"}
 	log.Infof("Sending Pong message, content : %s", response.Payload)
-	pkg.SendMessage(response, sender, protoID, []protocol.ID{protoID})
+	pkg.SendMessageTempTransport(response, sender, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
 }
 
 func (m *PingPongProtocol) handlePongMessage(sender peer.Peer, msg message.Message) {
@@ -73,6 +73,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 	pingMsg := Ping{Payload: "Ping"}
 	if len(m.activePeers) == 0 {
 		log.Infof("No active peers on ping timer")
+		return
 	}
 
 	for remotePeer := range m.activePeers {

@@ -256,8 +256,9 @@ func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sour
 		_ = exchangeHandshakeMessage(t, []protocol.ID{}, true)
 		msgBytes := toSend.Serializer().Serialize(toSend)
 		msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
-		log.Info("Sending message sideChannel")
-		t.SendMessage(msgWrapper.Serializer().Serialize(msgWrapper))
+		// log.Info("Sending message sideChannel")
+		wrappedBytes := msgWrapper.Serializer().Serialize(msgWrapper)
+		t.SendMessage(wrappedBytes)
 		t.Close()
 	}()
 }
@@ -265,18 +266,18 @@ func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sour
 func handleIncTmpTransport(newPeer peer.Peer, transport transport.Transport) {
 	deserializer := message.AppMessageWrapperSerializer{}
 	msgChan := transport.MessageChan()
-	log.Info("Waiting for message on temp channel...")
+	// log.Info("Waiting for message on temp channel...")
 	msg, ok := <-msgChan
 	if !ok {
 		log.Error("temporary conn exited before receiving applicational message")
 		return
 	}
-	log.Info("received message via temp channel")
+	// log.Info("received message via temp channel")
 	deserialized := deserializer.Deserialize(msg)
 	protoMsg := deserialized.(*message.AppMessageWrapper)
+	appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
 	for _, toNotifyID := range protoMsg.DestProtos {
 		if toNotify, ok := p.protocols.Load(toNotifyID); ok {
-			appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
 			toNotify.(protocolValueType).DeliverMessage(newPeer, appMsg)
 		} else {
 			log.Errorf("Ignored message: %+v", protoMsg)
@@ -430,13 +431,13 @@ func exchangeHandshakeMessage(transport transport.Transport, selfProtos []protoc
 		tempChanUint8 = 1
 	}
 	var toSend = message.NewProtoHandshakeMessage(selfProtos, p.config.ListenAddr, tempChanUint8)
-	log.Infof("Sending proto exchange message %+v", toSend)
+	// log.Infof("Sending proto exchange message %+v", toSend)
 	transport.SendMessage(protoMsgSerializer.Serialize(toSend))
 	msgChan := transport.MessageChan()
-	log.Infof("Waiting for proto exchange message")
+	// log.Infof("Waiting for proto exchange message")
 	msgBytes := <-msgChan
 	received := protoMsgSerializer.Deserialize(msgBytes).(message.ProtoHandshakeMessage)
-	log.Infof("Received proto exchange message: %+v", received)
+	// log.Infof("Received proto exchange message: %+v", received)
 	return received
 }
 

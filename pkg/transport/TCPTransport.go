@@ -71,7 +71,8 @@ func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 	binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(msgBytes)))
 	_, err := t.conn.Write(append(msgSizeBytes, msgBytes...))
 	if err != nil {
-		return errors.FatalError(500, err.Error(), TCPTransportCaller)
+		panic(errors.FatalError(500, err.Error(), TCPTransportCaller).Log)
+		//return errors.FatalError(500, err.Error(), TCPTransportCaller)
 	}
 	return nil
 }
@@ -79,13 +80,75 @@ func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 	log.Info("Routine piping messages to chan has started")
 	go func() {
+		var carry []byte
+	READ_START:
+		for {
+			msgBytes := make([]byte, MaxMessageBytes)
+			read, err := t.conn.Read(msgBytes)
+			if err != nil {
+				log.Warn("Routine piping messages to chan has exited due to:", err)
+				close(t.msgChan)
+				return
+			}
+
+			if len(carry) != 0 {
+				log.Infof("Have %d bytes of carry", len(carry))
+				read += len(carry)
+				msgBytes = append(carry, msgBytes[:read]...)
+				carry = []byte{}
+			}
+
+			if read <= 4 { // this case assures that there are at least 4 bytes to read a messageSize
+				log.Info("Not enough bytes to read messageSize")
+				carry = msgBytes[:read]
+				continue
+			}
+
+			bufPos := 0
+			for bufPos < read {
+				if bufPos != 0 {
+					log.Info("Processing remaining bytes of message")
+				}
+				msgSize := int(binary.BigEndian.Uint32(msgBytes[bufPos : bufPos+4]))
+				bufPos += 4
+				log.Info("read: ", read)
+				log.Info("msgSize: ", msgSize)
+				log.Info("bufPos: ", bufPos)
+				if bufPos+msgSize <= read {
+					log.Info("Piping message: ", string(msgBytes[bufPos:bufPos+msgSize]))
+					t.msgChan <- msgBytes[bufPos : bufPos+msgSize]
+					bufPos += msgSize
+
+					if bufPos == read {
+						log.Info("Base case, read entire buffer, going to start")
+						continue READ_START
+					}
+					if read-bufPos < 4 {
+						log.Warn(" have leftover but do not have enough bytes to read messageSize")
+						carry = msgBytes[bufPos:read]
+						continue READ_START
+					}
+				} else {
+					log.Warn(" have leftover but do not have enough bytes to read msgBody")
+					carry = msgBytes[bufPos-4 : read]
+					continue READ_START
+				}
+			}
+		}
+	}()
+	return t.msgChan
+}
+
+func (t *TCPTransport) PipeBytesToChan1() <-chan []byte {
+	// log.Info("Routine piping messages to chan has started")
+	go func() {
 		for {
 			var lenBytes []byte
 			for toRead := 4; toRead > 0; {
 				lenBytesTmp := make([]byte, toRead)
 				read, err := t.conn.Read(lenBytesTmp)
 				if err != nil {
-					log.Error("Routine piping messages to chan has exited due to:", err)
+					log.Warn("Routine piping messages to chan has exited due to:", err)
 					close(t.msgChan)
 					return
 				}
@@ -99,7 +162,7 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 				msgBytesTmp := make([]byte, toRead)
 				read, err := t.conn.Read(msgBytesTmp)
 				if err != nil {
-					log.Error("Routine piping messages to chan has exited due to:", err)
+					log.Warn("Routine piping messages to chan has exited due to:", err)
 					close(t.msgChan)
 					return
 				}
