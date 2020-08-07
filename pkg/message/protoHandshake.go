@@ -3,7 +3,6 @@ package message
 import (
 	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	log "github.com/sirupsen/logrus"
 	"net"
 )
 
@@ -51,7 +50,7 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 		bufPos += 2
 	}
 	toSend := append(buf, []byte(protoMsg.ListenAddr.String())...)
-	log.Info("serialized handshake message size: ", len(toSend))
+	// log.Info("serialized handshake message size: ", len(toSend))
 	return toSend
 }
 
@@ -62,7 +61,6 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	bufPos++
 	nrProtos := binary.BigEndian.Uint16(buf[bufPos:])
 	bufPos += 2
-	log.Info("nrProtos: ", nrProtos)
 	newMsg.Protos = make([]protocol.ID, nrProtos)
 	for i := 0; uint16(i) < nrProtos; i++ {
 		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])
@@ -71,7 +69,6 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 	listenAddrStr := string(buf[bufPos:])
 	listenAddr, err := net.ResolveTCPAddr("tcp4", listenAddrStr)
 	if err != nil {
-		log.Errorf("Message %s has invalid format", string(buf))
 		panic("Peer has invalid listen addr")
 	}
 	newMsg.ListenAddr = listenAddr

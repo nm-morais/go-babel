@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
+	"time"
 )
 
 const TCPTransportCaller = "TCPTransportCaller"
@@ -35,6 +36,13 @@ func NewTCPDialer() Transport {
 	}
 }
 
+func (t *TCPTransport) SetReadTimeout(duration time.Duration) {
+	if err := t.conn.SetReadDeadline(time.Now().Add(duration)); err != nil {
+		log.Error(err)
+	}
+
+}
+
 func (t *TCPTransport) Listen() <-chan Transport {
 	newConnChan := make(chan Transport)
 	go func() {
@@ -51,7 +59,7 @@ func (t *TCPTransport) Listen() <-chan Transport {
 
 		for {
 			conn, err := l.Accept()
-			log.Infof("Someone dialed me")
+			//log.Infof("Someone dialed me")
 			if err != nil {
 				log.Error(err)
 				continue
@@ -72,25 +80,26 @@ func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 	binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(msgBytes)))
 	_, err := t.conn.Write(append(msgSizeBytes, msgBytes...))
 	if err != nil {
-		panic(errors.FatalError(500, err.Error(), TCPTransportCaller).Log)
+		return errors.FatalError(500, err.Error(), TCPTransportCaller)
 		//return errors.FatalError(500, err.Error(), TCPTransportCaller)
 	}
 	return nil
 }
 
 func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
-	log.Info("Routine piping messages to chan has started")
+	//log.Info("Routine piping messages to chan has started")
 	go func() {
 		var carry []byte
+
 	READ_START:
 		for {
 			msgBytes := make([]byte, MaxMessageBytes)
 			read, err := t.conn.Read(msgBytes)
 			if err != nil {
 				if err == io.EOF {
-					log.Info("Routine exited because remote peer closed")
+					log.Info("Routine exited because remote peer closed connection")
 				}
-				log.Info("Routine piping messages to chan has exited due to:", err)
+				//log.Info("Routine piping messages to chan has exited due to:", err)
 				close(t.msgChan)
 				return
 			}

@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net"
+	"time"
 )
 
 type ProtocolManagerConfig struct {
-	ListenAddr net.Addr
+	ListenAddr             net.Addr
+	HeartbeatTickDuration  time.Duration
+	ConnectionReadTimeout time.Duration
 }
 
 func ReadConfigFromFile(filePath string) ProtocolManagerConfig {

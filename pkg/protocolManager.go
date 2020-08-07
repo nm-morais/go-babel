@@ -15,9 +15,9 @@ import (
 	"github.com/nm-morais/go-babel/pkg/timer"
 	"github.com/nm-morais/go-babel/pkg/transport"
 	log "github.com/sirupsen/logrus"
-	"net"
 	"reflect"
 	"sync"
+	"time"
 )
 
 const configFilePath = "./configs/config.json"
@@ -44,9 +44,14 @@ type IProtocolManager interface {
 type protocolValueType = *internalProto.WrapperProtocol
 type activeTransportValueType = transport.Transport
 
+var hbProtoInternalID = protocol.ID(1)
+var reservedProtos = []protocol.ID{hbProtoInternalID}
+
 type protoManager struct {
+	selfPeer                peer.Peer
 	config                  configs.ProtocolManagerConfig
 	notificationHub         notificationHub.NotificationHub
+	hbChannels              *sync.Map
 	serializationManager    *serialization.Manager
 	protocols               *sync.Map
 	protoIds                []protocol.ID
@@ -54,7 +59,7 @@ type protoManager struct {
 	dialingTransportsMutex  *sync.Mutex
 	activeTransports        *sync.Map
 	listener                transport.Transport
-	channelSubscribers      map[peer.Peer][]protocol.ID
+	channelSubscribers      map[string][]protocol.ID
 	channelSubscribersMutex *sync.Mutex
 }
 
@@ -68,6 +73,8 @@ func GetProtocolManager() *protoManager {
 func InitProtoManager(configs configs.ProtocolManagerConfig) *protoManager {
 	p = &protoManager{
 		config:                  configs,
+		hbChannels:              &sync.Map{},
+		selfPeer:                peer.NewPeer(configs.ListenAddr),
 		notificationHub:         notificationHub.NewNotificationHub(),
 		serializationManager:    serialization.NewSerializationManager(),
 		protocols:               &sync.Map{},
@@ -75,7 +82,7 @@ func InitProtoManager(configs configs.ProtocolManagerConfig) *protoManager {
 		dialingTransports:       &sync.Map{},
 		dialingTransportsMutex:  &sync.Mutex{},
 		activeTransports:        &sync.Map{},
-		channelSubscribers:      make(map[peer.Peer][]protocol.ID),
+		channelSubscribers:      make(map[string][]protocol.ID),
 		channelSubscribersMutex: &sync.Mutex{},
 	}
 	return p
@@ -94,14 +101,15 @@ func handleTransportListener() {
 			continue
 		}
 
-		p.activeTransports.Store(remotePeer, newPeerTransport)
+		p.activeTransports.Store(remotePeer.Addr().String(), newPeerTransport)
+		go startConnHeartbeat(remotePeer)
 		for _, remoteProtoID := range handshakeMsg.Protos {
 			if proto, ok := p.protocols.Load(remoteProtoID); ok {
 				p.channelSubscribersMutex.Lock()
 				if proto.(protocolValueType).InConnRequested(remotePeer) {
-					p.channelSubscribers[remotePeer] = append(p.channelSubscribers[remotePeer], remoteProtoID)
+					p.channelSubscribers[remotePeer.Addr().String()] = append(p.channelSubscribers[remotePeer.Addr().String()], remoteProtoID)
 				}
-				if len(p.channelSubscribers[remotePeer]) == 0 {
+				if len(p.channelSubscribers[remotePeer.Addr().String()]) == 0 {
 					p.channelSubscribersMutex.Unlock()
 					newPeerTransport.Close()
 					return
@@ -119,6 +127,12 @@ func RegisterTransportListener(listener transport.Transport) {
 
 func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 	_, ok := p.protocols.Load(protocol.ID())
+	for _, protoID := range reservedProtos {
+		if protocol.ID() == protoID {
+			log.Panicf("Trying to add protocol with invalid ID (reserved by internal mechanisms). Reserved protos: %+v", reservedProtos)
+		}
+	}
+
 	if ok {
 		return errors.FatalError(409, "Protocol already registered", ProtoManagerCaller)
 	}
@@ -171,7 +185,7 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 }
 
 func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) errors.Error {
-	conn, ok := p.activeTransports.Load(destPeer)
+	conn, ok := p.activeTransports.Load(destPeer.Addr().String())
 	if !ok {
 		return errors.NonFatalError(404, "No active connection to peer", ProtoManagerCaller)
 	}
@@ -186,6 +200,9 @@ func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID,
 		if err != nil {
 			err.Log()
 		}
+		//log.Info("renewing hb timer")
+		renewHbTimer(destPeer)
+		//log.Info("done renewing  hb timer")
 	}()
 
 	return nil
@@ -293,11 +310,11 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 	}
 	decodedSourceProto := sourceProto.(protocolValueType)
 
-	_, ok = p.activeTransports.Load(toDial)
+	_, ok = p.activeTransports.Load(toDial.Addr().String())
 	if ok {
 		p.channelSubscribersMutex.Lock()
 		if decodedSourceProto.DialSuccess(sourceProtoID, toDial) {
-			p.channelSubscribers[toDial] = append(p.channelSubscribers[toDial], sourceProtoID)
+			p.channelSubscribers[toDial.Addr().String()] = append(p.channelSubscribers[toDial.Addr().String()], sourceProtoID)
 		}
 		p.channelSubscribersMutex.Unlock()
 		return nil
@@ -308,7 +325,7 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 		waitChan := doneDialing.(chan interface{})
 		go func() {
 			<-waitChan
-			_, ok = p.activeTransports.Load(toDial)
+			_, ok = p.activeTransports.Load(toDial.Addr().String())
 			if !ok {
 				decodedSourceProto.DialFailed(toDial)
 			}
@@ -322,7 +339,7 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 		waitChan := doneDialing.(chan interface{})
 		go func() {
 			<-waitChan
-			_, ok = p.activeTransports.Load(toDial)
+			_, ok = p.activeTransports.Load(toDial.Addr().String())
 			if !ok {
 				decodedSourceProto.DialFailed(toDial)
 			}
@@ -343,12 +360,15 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 			return
 		}
 		go t.PipeBytesToChan()
-		log.Infof("Done dialing node %s", toDial.Addr())
-		log.Infof("Exchanging protos")
+		// log.Infof("Done dialing node %s", toDial.Addr())
+		// log.Infof("Exchanging protos")
 		handshakeMsg := exchangeHandshakeMessage(t, p.protoIds, false)
 		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
-		log.Infof("Done exchanging protos")
-		p.activeTransports.Store(remotePeer, t)
+		// log.Infof("Done exchanging protos")
+		p.activeTransports.Store(remotePeer.Addr().String(), t)
+		go startConnHeartbeat(remotePeer)
+
+		//log.Info("Remote protos: %d", handshakeMsg.Protos)
 
 		for _, destProtoID := range handshakeMsg.Protos {
 			proto, ok := p.protocols.Load(destProtoID)
@@ -356,14 +376,15 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 				convertedProto := proto.(protocolValueType)
 				p.channelSubscribersMutex.Lock()
 				if convertedProto.DialSuccess(sourceProtoID, remotePeer) {
-					p.channelSubscribers[remotePeer] = append(p.channelSubscribers[remotePeer], convertedProto.ID())
+					p.channelSubscribers[remotePeer.Addr().String()] = append(p.channelSubscribers[remotePeer.Addr().String()], convertedProto.ID())
 				}
-				if len(p.channelSubscribers[remotePeer]) == 0 {
+				if len(p.channelSubscribers[remotePeer.Addr().String()]) != 0 {
 					p.channelSubscribersMutex.Unlock()
-					t.Close()
 					return
+				} else {
+					t.Close()
+					panic("Dialed node has no interested protocols")
 				}
-				p.channelSubscribersMutex.Unlock()
 			}
 		}
 		close(done)
@@ -378,46 +399,101 @@ func handlePeerConn(newPeer peer.Peer, msgChan <-chan []byte) {
 		msg, ok := <-msgChan
 		if !ok {
 			p.channelSubscribersMutex.Lock()
-			toNotify := p.channelSubscribers[newPeer]
+			toNotify := p.channelSubscribers[newPeer.Addr().String()]
 			for _, protoID := range toNotify {
 				proto, _ := p.protocols.Load(protoID)
 				proto.(protocolValueType).TransportFailure(newPeer)
 			}
+			delete(p.channelSubscribers, newPeer.Addr().String())
 			p.channelSubscribersMutex.Unlock()
 			p.dialingTransportsMutex.Lock()
-			p.activeTransports.Delete(newPeer)
-			p.dialingTransports.Delete(newPeer)
+			p.activeTransports.Delete(newPeer.Addr().String())
 			p.dialingTransportsMutex.Unlock()
 			return
 		}
+
+		if conn, ok := p.activeTransports.Load(newPeer.Addr().String()); ok {
+			conn.(transport.Transport).SetReadTimeout(3 * p.config.ConnectionReadTimeout)
+			if !ok {
+				panic("active connection not in activeTransports")
+			}
+		}
+
 		deserialized := deserializer.Deserialize(msg)
 		protoMsg := deserialized.(*message.AppMessageWrapper)
+
+		if protoMsg.MessageID == message.HeartbeatMessageType {
+			//log.Warnf("Got heartbeat from %s", newPeer.Addr().String())
+			continue
+		}
+
+		// log.Warnf("Got message: %+v", protoMsg)
+
 		//log.Infof("Got protoMessage: %+v", protoMsg)
 		for _, toNotifyID := range protoMsg.DestProtos {
 			if toNotify, ok := p.protocols.Load(toNotifyID); ok {
+				// log.Warnf("Notifying protocol: %s", reflect.TypeOf(toNotify.(protocolValueType)))
 				appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
-				//log.Infof("Notifying: %s", reflect.TypeOf(toNotify.(protocolValueType)))
 				toNotify.(protocolValueType).DeliverMessage(newPeer, appMsg)
 			} else {
-				log.Infof("Ignored messages: %+v", protoMsg)
+				log.Warnf("Ignored messages: %+v", protoMsg)
 			}
 		}
 	}
 }
 
+func startConnHeartbeat(peer peer.Peer) {
+	hbChannel := make(chan *struct{})
+	p.hbChannels.Store(peer, hbChannel)
+	defer func() {
+		close(hbChannel)
+		p.hbChannels.Delete(peer)
+		log.Warn("Heartbeat routine exiting...")
+	}()
+	hbSerializer := message.HeartbeatSerializer{}
+	appMsgSerializer := message.AppMessageWrapperSerializer{}
+	hbMessage := message.HeartbeatMessage{}
+	msgWraper := message.NewAppMessageWrapper(hbMessage.Type(), hbProtoInternalID, []protocol.ID{hbProtoInternalID}, hbSerializer.Serialize(hbMessage))
+	msgWraperBytes := appMsgSerializer.Serialize(msgWraper)
+	for {
+		select {
+		case _, ok := <-hbChannel:
+			if !ok {
+				return
+			}
+		case <-time.After(p.config.HeartbeatTickDuration):
+			peerTransport, ok := p.activeTransports.Load(peer.Addr().String())
+			if !ok {
+				return
+			}
+			//log.Info("Sending heartbeat...")
+			if err := peerTransport.(transport.Transport).SendMessage(msgWraperBytes); err != nil {
+				err.Log()
+				return
+			}
+		}
+	}
+}
+
+func renewHbTimer(peer peer.Peer) {
+	if hbChan, ok := p.hbChannels.Load(peer); ok {
+		hbChan.(chan *struct{}) <- nil
+	}
+}
+
 func Disconnect(source protocol.ID, peer peer.Peer) {
 	p.channelSubscribersMutex.Lock()
-	subscribers := p.channelSubscribers[peer]
+	subscribers := p.channelSubscribers[peer.Addr().String()]
 	for i, protoID := range subscribers {
 		if protoID == source {
 			subscribers[i] = subscribers[len(subscribers)-1]
 			newArr := subscribers[:len(subscribers)-1]
-			p.channelSubscribers[peer] = newArr
-			if len(p.channelSubscribers[peer]) == 0 {
-				if t, ok := p.activeTransports.Load(peer); ok {
+			p.channelSubscribers[peer.Addr().String()] = newArr
+			if len(p.channelSubscribers[peer.Addr().String()]) == 0 {
+				if t, ok := p.activeTransports.Load(peer.Addr().String()); ok {
 					t.(activeTransportValueType).Close()
 				}
-				delete(p.channelSubscribers, peer)
+				delete(p.channelSubscribers, peer.Addr().String())
 			}
 			break
 		}
@@ -441,8 +517,8 @@ func exchangeHandshakeMessage(transport transport.Transport, selfProtos []protoc
 	return received
 }
 
-func Addr() net.Addr {
-	return p.config.ListenAddr
+func SelfPeer() peer.Peer {
+	return p.selfPeer
 }
 
 func Start() {
@@ -459,5 +535,5 @@ func Start() {
 		return true
 	})
 
-	select {} // in order to hang forever
+	select {}
 }

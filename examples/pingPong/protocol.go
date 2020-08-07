@@ -36,7 +36,7 @@ func (m *PingPongProtocol) Init() {
 }
 
 func (m *PingPongProtocol) Start() {
-	if pkg.Addr().String() != m.contact.Addr().String() {
+	if pkg.SelfPeer().Addr().String() != m.contact.Addr().String() {
 		log.Infof("Dialing contact node")
 		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
 	} else {

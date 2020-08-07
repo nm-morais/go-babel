@@ -3,13 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	. "github.com/nm-morais/go-babel/configs"
-	"github.com/nm-morais/go-babel/examples/heartbeat"
-	"github.com/nm-morais/go-babel/examples/pingPong"
+	"github.com/nm-morais/go-babel/configs"
+	"github.com/nm-morais/go-babel/examples/hyparview"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/transport"
 	"net"
+	"time"
 )
 
 func main() {
@@ -22,10 +22,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	configs := ProtocolManagerConfig{
-		ListenAddr: listenAddr,
+	config := configs.ProtocolManagerConfig{
+		HeartbeatTickDuration: 1 * time.Second,
+		ConnectionReadTimeout: 3 * time.Second,
+		ListenAddr:            listenAddr,
 	}
-	pkg.InitProtoManager(configs)
+	pkg.InitProtoManager(config)
 
 	listener := transport.NewTCPListener(listenAddr)
 	pkg.RegisterTransportListener(listener)
@@ -35,7 +37,6 @@ func main() {
 		panic(err)
 	}
 
-	pkg.RegisterProtocol(&heartbeat.Heartbeat{})
-	pkg.RegisterProtocol(pingPong.NewPingPongProtocol(peer.NewPeer(contactNodeAddr)))
+	pkg.RegisterProtocol(hyparview.NewHYparviewProtocol(peer.NewPeer(contactNodeAddr)))
 	pkg.Start()
 }
