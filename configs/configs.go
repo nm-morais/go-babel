@@ -8,9 +8,11 @@ import (
 )
 
 type ProtocolManagerConfig struct {
-	ListenAddr             net.Addr
-	HeartbeatTickDuration  time.Duration
+	ListenAddr            net.Addr
+	HandshakeTimeout      time.Duration
+	HeartbeatTickDuration time.Duration
 	ConnectionReadTimeout time.Duration
+	DialTimeout           time.Duration
 }
 
 func ReadConfigFromFile(filePath string) ProtocolManagerConfig {

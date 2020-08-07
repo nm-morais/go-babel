@@ -121,7 +121,6 @@ func (pw *WrapperProtocol) handleChannels() {
 	log.Info("Channel loop started")
 	for {
 		select {
-
 		// net events
 		case event := <-pw.inConnRequested:
 			event.respChan <- pw.wrappedProtocol.InConnRequested(event.peer)

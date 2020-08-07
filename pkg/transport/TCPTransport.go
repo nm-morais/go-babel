@@ -28,7 +28,7 @@ func NewTCPListener(listenAddr net.Addr) Transport {
 		ListenAddr: listenAddr,
 		conn:       nil,
 		closeLock:  &sync.Mutex{},
-		msgChan:    make(chan []byte),
+		msgChan:    make(chan []byte, 10),
 		finish:     make(chan interface{}),
 		closeOnce:  &sync.Once{},
 	}
@@ -38,7 +38,7 @@ func NewTCPDialer() Transport {
 	return &TCPTransport{
 		ListenAddr: nil,
 		conn:       nil,
-		msgChan:    make(chan []byte),
+		msgChan:    make(chan []byte, 10),
 		finish:     make(chan interface{}),
 		closeLock:  &sync.Mutex{},
 		closeOnce:  &sync.Once{},
@@ -75,7 +75,7 @@ func (t *TCPTransport) Listen() <-chan Transport {
 				ListenAddr: nil,
 				conn:       conn,
 				finish:     make(chan interface{}),
-				msgChan:    make(chan []byte),
+				msgChan:    make(chan []byte, 10),
 				closeOnce:  &sync.Once{},
 				closeLock:  &sync.Mutex{},
 			}
@@ -103,7 +103,6 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 	go func() {
 		defer t.Close()
 		var carry []byte
-
 	READ_START:
 		for {
 			msgBytes := make([]byte, MaxMessageBytes)
@@ -144,9 +143,14 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 						log.Warn("Routine piping messages to chan has exited due to being closed")
 						t.closeLock.Unlock()
 						return
-					case t.msgChan <- msgBytes[bufPos : bufPos+msgSize]:
+					default:
+						select {
+						case t.msgChan <- msgBytes[bufPos : bufPos+msgSize]:
+							t.closeLock.Unlock()
+						case <-time.After(3 * time.Second):
+							log.Panic("Could not pipe message bytes into msg chan")
+						}
 					}
-					t.closeLock.Unlock()
 
 					bufPos += msgSize
 
@@ -165,48 +169,6 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 					continue READ_START
 				}
 			}
-		}
-	}()
-	return t.msgChan
-}
-
-func (t *TCPTransport) PipeBytesToChan1() <-chan []byte {
-	// log.Info("Routine piping messages to chan has started")
-	go func() {
-		for {
-			var lenBytes []byte
-			for toRead := 4; toRead > 0; {
-				lenBytesTmp := make([]byte, toRead)
-				read, err := t.conn.Read(lenBytesTmp)
-				if err != nil {
-					log.Warn("Routine piping messages to chan has exited due to:", err)
-					return
-				}
-				toRead -= read
-				lenBytes = append(lenBytes, lenBytesTmp[:read]...)
-			}
-			var msgBytes []byte
-			msgSize := int(binary.BigEndian.Uint32(lenBytes))
-			log.Info("Message size: ", msgSize)
-			for toRead := msgSize; toRead > 0; {
-				msgBytesTmp := make([]byte, toRead)
-				read, err := t.conn.Read(msgBytesTmp)
-				if err != nil {
-					//log.Warn("Routine piping messages to chan has exited due to:", err)
-					return
-				}
-				toRead -= read
-				msgBytes = append(msgBytes, msgBytesTmp[:read]...)
-			}
-			t.closeLock.Lock()
-			select {
-			case <-t.finish:
-				//log.Warn("Routine piping messages to chan has exited due to being closed")
-				t.closeLock.Unlock()
-				return
-			case t.msgChan <- msgBytes:
-			}
-			t.closeLock.Unlock()
 		}
 	}()
 	return t.msgChan
