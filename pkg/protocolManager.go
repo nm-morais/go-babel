@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/internal/notificationHub"
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
@@ -85,6 +86,7 @@ func InitProtoManager(configs configs.ProtocolManagerConfig) *protoManager {
 		channelSubscribers:      make(map[string][]protocol.ID),
 		channelSubscribersMutex: &sync.Mutex{},
 	}
+	p.serializationManager.RegisterSerializer(message.HeartbeatMessageType, message.HeartbeatSerializer{})
 	return p
 }
 
@@ -101,23 +103,22 @@ func handleTransportListener() {
 			continue
 		}
 
-		p.activeTransports.Store(remotePeer.Addr().String(), newPeerTransport)
-		go startConnHeartbeat(remotePeer)
+		p.channelSubscribersMutex.Lock()
 		for _, remoteProtoID := range handshakeMsg.Protos {
 			if proto, ok := p.protocols.Load(remoteProtoID); ok {
-				p.channelSubscribersMutex.Lock()
 				if proto.(protocolValueType).InConnRequested(remotePeer) {
-					p.channelSubscribers[remotePeer.Addr().String()] = append(p.channelSubscribers[remotePeer.Addr().String()], remoteProtoID)
+					p.channelSubscribers[remotePeer.ToString()] = append(p.channelSubscribers[remotePeer.ToString()], remoteProtoID)
 				}
-				if len(p.channelSubscribers[remotePeer.Addr().String()]) == 0 {
-					p.channelSubscribersMutex.Unlock()
-					newPeerTransport.Close()
-					return
-				}
-				p.channelSubscribersMutex.Unlock()
 			}
 		}
-		go handlePeerConn(remotePeer, newPeerTransport.MessageChan())
+		if len(p.channelSubscribers[remotePeer.ToString()]) == 0 {
+			newPeerTransport.Close()
+			p.channelSubscribersMutex.Unlock()
+			return
+		}
+		p.channelSubscribersMutex.Unlock()
+		p.activeTransports.Store(remotePeer.ToString(), newPeerTransport)
+		go handlePeerConn(newPeerTransport, remotePeer)
 	}
 }
 
@@ -185,11 +186,11 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 }
 
 func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) errors.Error {
-	conn, ok := p.activeTransports.Load(destPeer.Addr().String())
+	conn, ok := p.activeTransports.Load(destPeer.ToString())
 	if !ok {
 		return errors.NonFatalError(404, "No active connection to peer", ProtoManagerCaller)
 	}
-
+	log.Infof("Sending message of type %s", reflect.TypeOf(toSend))
 	go func() {
 		msgBytes := p.serializationManager.Serialize(toSend)
 		wrapper := message.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
@@ -199,6 +200,7 @@ func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID,
 		err := conn.(transport.Transport).SendMessage(toSendBytes)
 		if err != nil {
 			err.Log()
+			panic(err)
 		}
 		//log.Info("renewing hb timer")
 		renewHbTimer(destPeer)
@@ -265,12 +267,11 @@ func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sour
 	go func() {
 		err := <-errChan
 		if err != nil {
-			log.Error("Side channel dial failed")
 			log.Error(err)
 			return
 		}
 		go t.PipeBytesToChan()
-		_ = exchangeHandshakeMessage(t, []protocol.ID{}, true)
+		sendHandshakeMessage(t, destProtos, true)
 		msgBytes := toSend.Serializer().Serialize(toSend)
 		msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
 		// log.Info("Sending message sideChannel")
@@ -310,11 +311,11 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 	}
 	decodedSourceProto := sourceProto.(protocolValueType)
 
-	_, ok = p.activeTransports.Load(toDial.Addr().String())
+	_, ok = p.activeTransports.Load(toDial.ToString())
 	if ok {
 		p.channelSubscribersMutex.Lock()
 		if decodedSourceProto.DialSuccess(sourceProtoID, toDial) {
-			p.channelSubscribers[toDial.Addr().String()] = append(p.channelSubscribers[toDial.Addr().String()], sourceProtoID)
+			p.channelSubscribers[toDial.ToString()] = append(p.channelSubscribers[toDial.ToString()], sourceProtoID)
 		}
 		p.channelSubscribersMutex.Unlock()
 		return nil
@@ -323,13 +324,7 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 	doneDialing, ok := p.dialingTransports.Load(toDial)
 	if ok {
 		waitChan := doneDialing.(chan interface{})
-		go func() {
-			<-waitChan
-			_, ok = p.activeTransports.Load(toDial.Addr().String())
-			if !ok {
-				decodedSourceProto.DialFailed(toDial)
-			}
-		}()
+		go waitDial(sourceProtoID, toDial, waitChan)
 		return nil
 	}
 
@@ -337,18 +332,14 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 	doneDialing, ok = p.dialingTransports.Load(toDial)
 	if ok {
 		waitChan := doneDialing.(chan interface{})
-		go func() {
-			<-waitChan
-			_, ok = p.activeTransports.Load(toDial.Addr().String())
-			if !ok {
-				decodedSourceProto.DialFailed(toDial)
-			}
-		}()
+		go waitDial(sourceProtoID, toDial, waitChan)
+		p.dialingTransportsMutex.Unlock()
 		return nil
 	}
 	done := make(chan interface{})
 	p.dialingTransports.Store(toDial, done)
 	p.dialingTransportsMutex.Unlock()
+
 	go func() {
 		log.Infof("Dialing new node %s", toDial.Addr())
 		errChan := t.Dial(toDial)
@@ -360,84 +351,107 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Transport) er
 			return
 		}
 		go t.PipeBytesToChan()
+
 		// log.Infof("Done dialing node %s", toDial.Addr())
 		// log.Infof("Exchanging protos")
-		handshakeMsg := exchangeHandshakeMessage(t, p.protoIds, false)
-		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
-		// log.Infof("Done exchanging protos")
-		p.activeTransports.Store(remotePeer.Addr().String(), t)
-		go startConnHeartbeat(remotePeer)
-
 		//log.Info("Remote protos: %d", handshakeMsg.Protos)
 
+		handshakeMsg := exchangeHandshakeMessage(t, p.protoIds, false)
+		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
+		p.channelSubscribersMutex.Lock()
 		for _, destProtoID := range handshakeMsg.Protos {
 			proto, ok := p.protocols.Load(destProtoID)
 			if ok {
 				convertedProto := proto.(protocolValueType)
-				p.channelSubscribersMutex.Lock()
 				if convertedProto.DialSuccess(sourceProtoID, remotePeer) {
-					p.channelSubscribers[remotePeer.Addr().String()] = append(p.channelSubscribers[remotePeer.Addr().String()], convertedProto.ID())
-				}
-				if len(p.channelSubscribers[remotePeer.Addr().String()]) != 0 {
-					p.channelSubscribersMutex.Unlock()
-					return
-				} else {
-					t.Close()
-					panic("Dialed node has no interested protocols")
+					p.channelSubscribers[remotePeer.ToString()] = append(p.channelSubscribers[remotePeer.ToString()], convertedProto.ID())
 				}
 			}
 		}
+		if len(p.channelSubscribers[remotePeer.ToString()]) == 0 {
+			t.Close()
+			p.channelSubscribersMutex.Unlock()
+			return
+		}
+		p.channelSubscribersMutex.Unlock()
+		p.activeTransports.Store(remotePeer.ToString(), t)
 		close(done)
-		handlePeerConn(remotePeer, t.MessageChan())
+		handlePeerConn(t, remotePeer)
 	}()
 	return nil
 }
 
-func handlePeerConn(newPeer peer.Peer, msgChan <-chan []byte) {
+func Disconnect(source protocol.ID, peer peer.Peer) {
+	p.channelSubscribersMutex.Lock()
+	subscribers := p.channelSubscribers[peer.ToString()]
+	for i, protoID := range subscribers {
+		if protoID == source {
+			subscribers[i] = subscribers[len(subscribers)-1]
+			newArr := subscribers[:len(subscribers)-1]
+			p.channelSubscribers[peer.ToString()] = newArr
+			if len(p.channelSubscribers[peer.ToString()]) == 0 {
+				if t, ok := p.activeTransports.Load(peer.ToString()); ok {
+					t.(activeTransportValueType).Close()
+					p.activeTransports.Delete(peer.ToString())
+				}
+				delete(p.channelSubscribers, peer.ToString())
+			}
+			break
+		}
+	}
+	p.channelSubscribersMutex.Unlock()
+}
+
+func SelfPeer() peer.Peer {
+	return p.selfPeer
+}
+
+func subscribeProtoToChanNotifications(protoID protocol.ID) {
+
+}
+
+func handlePeerConn(t transport.Transport, newPeer peer.Peer) {
+
+	if len(p.channelSubscribers[newPeer.ToString()]) == 0 {
+		t.Close()
+		panic("Dialed node has no interested protocols")
+	}
+
+	go startConnHeartbeat(newPeer)
 	deserializer := message.AppMessageWrapperSerializer{}
 	for {
-		msg, ok := <-msgChan
-		if !ok {
-			p.channelSubscribersMutex.Lock()
-			toNotify := p.channelSubscribers[newPeer.Addr().String()]
-			for _, protoID := range toNotify {
-				proto, _ := p.protocols.Load(protoID)
-				proto.(protocolValueType).TransportFailure(newPeer)
-			}
-			delete(p.channelSubscribers, newPeer.Addr().String())
-			p.channelSubscribersMutex.Unlock()
-			p.dialingTransportsMutex.Lock()
-			p.activeTransports.Delete(newPeer.Addr().String())
-			p.dialingTransportsMutex.Unlock()
-			return
-		}
+		t.SetReadTimeout(3 * p.config.ConnectionReadTimeout)
+		msgChan := t.MessageChan()
+		select {
+		case msg, ok := <-msgChan:
 
-		if conn, ok := p.activeTransports.Load(newPeer.Addr().String()); ok {
-			conn.(transport.Transport).SetReadTimeout(3 * p.config.ConnectionReadTimeout)
 			if !ok {
-				panic("active connection not in activeTransports")
+				handleTransportFailure(newPeer)
+				return
 			}
-		}
 
-		deserialized := deserializer.Deserialize(msg)
-		protoMsg := deserialized.(*message.AppMessageWrapper)
+			deserialized := deserializer.Deserialize(msg)
+			protoMsg := deserialized.(*message.AppMessageWrapper)
 
-		if protoMsg.MessageID == message.HeartbeatMessageType {
-			//log.Warnf("Got heartbeat from %s", newPeer.Addr().String())
-			continue
-		}
-
-		// log.Warnf("Got message: %+v", protoMsg)
-
-		//log.Infof("Got protoMessage: %+v", protoMsg)
-		for _, toNotifyID := range protoMsg.DestProtos {
-			if toNotify, ok := p.protocols.Load(toNotifyID); ok {
-				// log.Warnf("Notifying protocol: %s", reflect.TypeOf(toNotify.(protocolValueType)))
-				appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
-				toNotify.(protocolValueType).DeliverMessage(newPeer, appMsg)
-			} else {
-				log.Warnf("Ignored messages: %+v", protoMsg)
+			if protoMsg.MessageID == message.HeartbeatMessageType {
+				//log.Warnf("Got heartbeat from %s", newPeer.ToString())
+				continue
 			}
+
+			// log.Warnf("Got message: %+v", protoMsg)
+
+			//log.Infof("Got protoMessage: %+v", protoMsg)
+			for _, toNotifyID := range protoMsg.DestProtos {
+				if toNotify, ok := p.protocols.Load(toNotifyID); ok {
+					// log.Warnf("Notifying protocol: %s", reflect.TypeOf(toNotify.(protocolValueType)))
+					appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
+					toNotify.(protocolValueType).DeliverMessage(newPeer, appMsg)
+				} else {
+					log.Panicf("Ignored message: %+v", protoMsg)
+				}
+			}
+		case <-time.After(3 * time.Second):
+			panic("Receiver routine has not received messages for 3 seconds")
 		}
 	}
 }
@@ -450,11 +464,7 @@ func startConnHeartbeat(peer peer.Peer) {
 		p.hbChannels.Delete(peer)
 		log.Warn("Heartbeat routine exiting...")
 	}()
-	hbSerializer := message.HeartbeatSerializer{}
-	appMsgSerializer := message.AppMessageWrapperSerializer{}
 	hbMessage := message.HeartbeatMessage{}
-	msgWraper := message.NewAppMessageWrapper(hbMessage.Type(), hbProtoInternalID, []protocol.ID{hbProtoInternalID}, hbSerializer.Serialize(hbMessage))
-	msgWraperBytes := appMsgSerializer.Serialize(msgWraper)
 	for {
 		select {
 		case _, ok := <-hbChannel:
@@ -462,12 +472,7 @@ func startConnHeartbeat(peer peer.Peer) {
 				return
 			}
 		case <-time.After(p.config.HeartbeatTickDuration):
-			peerTransport, ok := p.activeTransports.Load(peer.Addr().String())
-			if !ok {
-				return
-			}
-			//log.Info("Sending heartbeat...")
-			if err := peerTransport.(transport.Transport).SendMessage(msgWraperBytes); err != nil {
+			if err := SendMessage(hbMessage, peer, hbProtoInternalID, []protocol.ID{hbProtoInternalID}); err != nil {
 				err.Log()
 				return
 			}
@@ -481,24 +486,18 @@ func renewHbTimer(peer peer.Peer) {
 	}
 }
 
-func Disconnect(source protocol.ID, peer peer.Peer) {
+func handleTransportFailure(peer peer.Peer) {
 	p.channelSubscribersMutex.Lock()
-	subscribers := p.channelSubscribers[peer.Addr().String()]
-	for i, protoID := range subscribers {
-		if protoID == source {
-			subscribers[i] = subscribers[len(subscribers)-1]
-			newArr := subscribers[:len(subscribers)-1]
-			p.channelSubscribers[peer.Addr().String()] = newArr
-			if len(p.channelSubscribers[peer.Addr().String()]) == 0 {
-				if t, ok := p.activeTransports.Load(peer.Addr().String()); ok {
-					t.(activeTransportValueType).Close()
-				}
-				delete(p.channelSubscribers, peer.Addr().String())
-			}
-			break
-		}
+	toNotify := p.channelSubscribers[peer.ToString()]
+	for _, protoID := range toNotify {
+		proto, _ := p.protocols.Load(protoID)
+		proto.(protocolValueType).TransportFailure(peer)
 	}
+	delete(p.channelSubscribers, peer.ToString())
 	p.channelSubscribersMutex.Unlock()
+	p.dialingTransportsMutex.Lock()
+	p.activeTransports.Delete(peer.ToString())
+	p.dialingTransportsMutex.Unlock()
 }
 
 func exchangeHandshakeMessage(transport transport.Transport, selfProtos []protocol.ID, tempChan bool) message.ProtoHandshakeMessage {
@@ -517,8 +516,24 @@ func exchangeHandshakeMessage(transport transport.Transport, selfProtos []protoc
 	return received
 }
 
-func SelfPeer() peer.Peer {
-	return p.selfPeer
+func waitDial(dialerProto protocol.ID, toDial peer.Peer, waitChan chan interface{}) {
+	<-waitChan
+	proto, ok := p.activeTransports.Load(toDial.ToString())
+	if !ok {
+		proto.(protocolValueType).DialFailed(toDial)
+	} else {
+		proto.(protocolValueType).DialSuccess(dialerProto, toDial)
+	}
+}
+
+func sendHandshakeMessage(transport transport.Transport, selfProtos []protocol.ID, tempChan bool) {
+	var tempChanUint8 uint8 = 0
+	if tempChan == true {
+		tempChanUint8 = 1
+	}
+	var toSend = message.NewProtoHandshakeMessage(selfProtos, p.config.ListenAddr, tempChanUint8)
+	// log.Infof("Sending proto exchange message %+v", toSend)
+	transport.SendMessage(protoMsgSerializer.Serialize(toSend))
 }
 
 func Start() {
@@ -535,5 +550,18 @@ func Start() {
 		return true
 	})
 
-	select {}
+	logTicker := time.NewTicker(time.Second * 3)
+	for {
+		select {
+		case <-logTicker.C:
+			log.Info("------------- Protocol Manager state -------------")
+			var toLog string
+			toLog = "Active connections : "
+			p.activeTransports.Range(func(peer, conn interface{}) bool {
+				toLog += fmt.Sprintf("%s, ", peer.(string))
+				return true
+			})
+			log.Info(toLog)
+		}
+	}
 }

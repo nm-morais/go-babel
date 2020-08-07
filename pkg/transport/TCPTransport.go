@@ -5,8 +5,8 @@ import (
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
-	"io"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -16,6 +16,9 @@ type TCPTransport struct {
 	ListenAddr net.Addr
 	conn       net.Conn
 	msgChan    chan []byte
+	closeOnce  *sync.Once
+	closeLock  *sync.Mutex
+	finish     chan interface{}
 }
 
 const MaxMessageBytes = 2048
@@ -24,7 +27,10 @@ func NewTCPListener(listenAddr net.Addr) Transport {
 	return &TCPTransport{
 		ListenAddr: listenAddr,
 		conn:       nil,
+		closeLock:  &sync.Mutex{},
 		msgChan:    make(chan []byte),
+		finish:     make(chan interface{}),
+		closeOnce:  &sync.Once{},
 	}
 }
 
@@ -33,6 +39,9 @@ func NewTCPDialer() Transport {
 		ListenAddr: nil,
 		conn:       nil,
 		msgChan:    make(chan []byte),
+		finish:     make(chan interface{}),
+		closeLock:  &sync.Mutex{},
+		closeOnce:  &sync.Once{},
 	}
 }
 
@@ -52,9 +61,7 @@ func (t *TCPTransport) Listen() <-chan Transport {
 		}
 
 		defer func() {
-			if err := l.Close(); err != nil {
-				panic(err)
-			}
+			t.Close()
 		}()
 
 		for {
@@ -67,7 +74,10 @@ func (t *TCPTransport) Listen() <-chan Transport {
 			newTransport := &TCPTransport{
 				ListenAddr: nil,
 				conn:       conn,
+				finish:     make(chan interface{}),
 				msgChan:    make(chan []byte),
+				closeOnce:  &sync.Once{},
+				closeLock:  &sync.Mutex{},
 			}
 			newConnChan <- newTransport
 		}
@@ -80,6 +90,8 @@ func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 	binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(msgBytes)))
 	_, err := t.conn.Write(append(msgSizeBytes, msgBytes...))
 	if err != nil {
+		log.Error(err)
+		t.Close()
 		return errors.FatalError(500, err.Error(), TCPTransportCaller)
 		//return errors.FatalError(500, err.Error(), TCPTransportCaller)
 	}
@@ -89,6 +101,7 @@ func (t *TCPTransport) SendMessage(msgBytes []byte) errors.Error {
 func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 	//log.Info("Routine piping messages to chan has started")
 	go func() {
+		defer t.Close()
 		var carry []byte
 
 	READ_START:
@@ -96,11 +109,7 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 			msgBytes := make([]byte, MaxMessageBytes)
 			read, err := t.conn.Read(msgBytes)
 			if err != nil {
-				if err == io.EOF {
-					log.Info("Routine exited because remote peer closed connection")
-				}
 				//log.Info("Routine piping messages to chan has exited due to:", err)
-				close(t.msgChan)
 				return
 			}
 
@@ -129,7 +138,16 @@ func (t *TCPTransport) PipeBytesToChan() <-chan []byte {
 				//log.Info("bufPos: ", bufPos)
 				if bufPos+msgSize <= read {
 					//log.Info("Piping message: ", string(msgBytes[bufPos:bufPos+msgSize]))
-					t.msgChan <- msgBytes[bufPos : bufPos+msgSize]
+					t.closeLock.Lock()
+					select {
+					case <-t.finish:
+						log.Warn("Routine piping messages to chan has exited due to being closed")
+						t.closeLock.Unlock()
+						return
+					case t.msgChan <- msgBytes[bufPos : bufPos+msgSize]:
+					}
+					t.closeLock.Unlock()
+
 					bufPos += msgSize
 
 					if bufPos == read {
@@ -162,7 +180,6 @@ func (t *TCPTransport) PipeBytesToChan1() <-chan []byte {
 				read, err := t.conn.Read(lenBytesTmp)
 				if err != nil {
 					log.Warn("Routine piping messages to chan has exited due to:", err)
-					close(t.msgChan)
 					return
 				}
 				toRead -= read
@@ -175,14 +192,21 @@ func (t *TCPTransport) PipeBytesToChan1() <-chan []byte {
 				msgBytesTmp := make([]byte, toRead)
 				read, err := t.conn.Read(msgBytesTmp)
 				if err != nil {
-					log.Warn("Routine piping messages to chan has exited due to:", err)
-					close(t.msgChan)
+					//log.Warn("Routine piping messages to chan has exited due to:", err)
 					return
 				}
 				toRead -= read
 				msgBytes = append(msgBytes, msgBytesTmp[:read]...)
 			}
-			t.msgChan <- msgBytes
+			t.closeLock.Lock()
+			select {
+			case <-t.finish:
+				//log.Warn("Routine piping messages to chan has exited due to being closed")
+				t.closeLock.Unlock()
+				return
+			case t.msgChan <- msgBytes:
+			}
+			t.closeLock.Unlock()
 		}
 	}()
 	return t.msgChan
@@ -216,7 +240,13 @@ func (t *TCPTransport) MessageChan() <-chan []byte {
 }
 
 func (t *TCPTransport) Close() {
-	if err := t.conn.Close(); err != nil { // TODO close nicely
-		log.Error(err)
-	}
+	t.closeOnce.Do(func() {
+		t.closeLock.Lock()
+		if err := t.conn.Close(); err != nil { // TODO close nicely
+			log.Error(err)
+		}
+		close(t.finish)
+		close(t.msgChan)
+		t.closeLock.Unlock()
+	})
 }
