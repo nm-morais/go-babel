@@ -25,12 +25,9 @@ func main() {
 	configs := ProtocolManagerConfig{
 		HeartbeatTickDuration: 1 * time.Second,
 		ConnectionReadTimeout: 3 * time.Second,
-		ListenAddr:            listenAddr,
 	}
-	pkg.InitProtoManager(configs)
-
 	listener := transport.NewTCPListener(listenAddr)
-	pkg.RegisterTransportListener(listener)
+	pkg.InitProtoManager(configs, listener)
 
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1234")
 	if err != nil {

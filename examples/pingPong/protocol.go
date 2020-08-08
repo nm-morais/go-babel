@@ -38,7 +38,7 @@ func (m *PingPongProtocol) Init() {
 func (m *PingPongProtocol) Start() {
 	if pkg.SelfPeer().Addr().String() != m.contact.Addr().String() {
 		log.Infof("Dialing contact node")
-		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
+		pkg.Dial(m.contact, protoID, transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 	} else {
 		log.Infof("I'm contact node")
 	}
@@ -78,7 +78,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 
 	for remotePeer := range m.activePeers {
 		log.Infof("Sending pingMessage to %s", remotePeer.Addr().String())
-		//pkg.SendMessage(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
+		//pkg.Write(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		for i := 0; i < 1; i++ {
 			pkg.SendMessage(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		}

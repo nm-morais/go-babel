@@ -63,7 +63,7 @@ func (h *Hyparview) Start() {
 	toSend := JoinMessage{}
 	h.pendingDials[h.contactNode.ToString()] = true
 	log.Info("Sending join message...")
-	pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
+	pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 }
 
 func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
@@ -300,7 +300,7 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 	if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {
 		toSend := JoinMessage{}
 		h.pendingDials[h.contactNode.ToString()] = true
-		pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
+		pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 		return
 	}
 
@@ -425,10 +425,7 @@ func (h *Hyparview) dialNodeToActiveView(peer peer.Peer) {
 	if h.pendingDials[h.contactNode.ToString()] {
 		return
 	}
-	if err := pkg.Dial(peer, h.ID(), transport.NewTCPDialer()); err != nil {
-		err.Log()
-		return
-	}
+	pkg.Dial(peer, h.ID(), transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 	h.pendingDials[peer.ToString()] = true
 	h.logHyparviewState()
 }
@@ -512,5 +509,5 @@ func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
-	pkg.SendMessageTempTransport(msg, target, h.ID(), []protocol.ID{h.ID()}, transport.NewTCPDialer())
+	pkg.SendMessageTempTransport(msg, target, h.ID(), []protocol.ID{h.ID()}, transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 }

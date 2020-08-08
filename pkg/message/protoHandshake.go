@@ -50,7 +50,6 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 		bufPos += 2
 	}
 	toSend := append(buf, []byte(protoMsg.ListenAddr.String())...)
-	// log.Info("serialized handshake message size: ", len(toSend))
 	return toSend
 }
 
@@ -72,5 +71,5 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
 		panic("Peer has invalid listen addr")
 	}
 	newMsg.ListenAddr = listenAddr
-	return *newMsg
+	return newMsg
 }

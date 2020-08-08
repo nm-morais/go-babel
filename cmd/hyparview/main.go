@@ -38,13 +38,8 @@ func main() {
 		HeartbeatTickDuration: 1 * time.Second,
 		DialTimeout:           1 * time.Second,
 		ConnectionReadTimeout: 3 * time.Second,
-		ListenAddr:            listenAddr,
 	}
-	pkg.InitProtoManager(config)
-
-	listener := transport.NewTCPListener(listenAddr)
-	pkg.RegisterTransportListener(listener)
-
+	pkg.InitProtoManager(config, transport.NewTCPListener(listenAddr))
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1200")
 	if err != nil {
 		panic(err)

@@ -3,12 +3,10 @@ package configs
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net"
 	"time"
 )
 
 type ProtocolManagerConfig struct {
-	ListenAddr            net.Addr
 	HandshakeTimeout      time.Duration
 	HeartbeatTickDuration time.Duration
 	ConnectionReadTimeout time.Duration

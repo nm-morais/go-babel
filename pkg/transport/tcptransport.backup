@@ -21,9 +21,15 @@ type TCPTransport struct {
 	finish     chan interface{}
 }
 
+/*
+	mw         messageWriter
+	mr         messageReader
+	cw         chanWriter
+ */
+
 const MaxMessageBytes = 2048
 
-func NewTCPListener(listenAddr net.Addr) Transport {
+func NewTCPListener(listenAddr net.Addr) Stream {
 	return &TCPTransport{
 		ListenAddr: listenAddr,
 		conn:       nil,
@@ -34,7 +40,7 @@ func NewTCPListener(listenAddr net.Addr) Transport {
 	}
 }
 
-func NewTCPDialer() Transport {
+func NewTCPDialer() Stream {
 	return &TCPTransport{
 		ListenAddr: nil,
 		conn:       nil,
@@ -52,8 +58,8 @@ func (t *TCPTransport) SetReadTimeout(duration time.Duration) {
 
 }
 
-func (t *TCPTransport) Listen() <-chan Transport {
-	newConnChan := make(chan Transport)
+func (t *TCPTransport) Listen() <-chan Stream {
+	newConnChan := make(chan Stream)
 	go func() {
 		l, err := net.Listen("tcp4", t.ListenAddr.String())
 		if err != nil {
