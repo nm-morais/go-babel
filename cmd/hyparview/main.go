@@ -37,7 +37,7 @@ func main() {
 		HandshakeTimeout:      1 * time.Second,
 		HeartbeatTickDuration: 1 * time.Second,
 		DialTimeout:           1 * time.Second,
-		ConnectionReadTimeout: 3 * time.Second,
+		ConnectionReadTimeout: 5 * time.Second,
 	}
 	pkg.InitProtoManager(config, transport.NewTCPListener(listenAddr))
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1200")

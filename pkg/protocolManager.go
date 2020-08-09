@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"fmt"
 	"github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/internal/notificationHub"
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
@@ -66,15 +65,18 @@ var appMsgSerializer = message.AppMessageWrapperSerializer{}
 
 func InitProtoManager(configs configs.ProtocolManagerConfig, listener transport.Stream) *ProtoManager {
 	p = &ProtoManager{
-		config:               configs,
-		selfPeer:             peer.NewPeer(listener.ListenAddr()),
-		notificationHub:      notificationHub.NewNotificationHub(),
-		serializationManager: serialization.NewSerializationManager(),
-		protocols:            &sync.Map{},
-		protoIds:             []protocol.ID{},
-		streamManager:        NewStreamManager(),
-		listener:             listener,
+		config:                  configs,
+		selfPeer:                peer.NewPeer(listener.ListenAddr()),
+		notificationHub:         notificationHub.NewNotificationHub(),
+		serializationManager:    serialization.NewSerializationManager(),
+		protocols:               &sync.Map{},
+		protoIds:                []protocol.ID{},
+		streamManager:           NewStreamManager(),
+		listener:                listener,
+		channelSubscribers:      make(map[string]map[protocol.ID]bool),
+		channelSubscribersMutex: &sync.Mutex{},
 	}
+	p.serializationManager.RegisterSerializer(message.HeartbeatMessageType, message.HeartbeatSerializer{})
 	return p
 }
 
@@ -140,12 +142,14 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 
 func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) errors.Error {
 	//log.Infof("Sending message of type %s", reflect.TypeOf(toSend))
-	msgBytes := p.serializationManager.Serialize(toSend)
-	wrapper := message.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
-	// log.Infof("Sending: %+v", wrapper)
-	toSendBytes := appMsgSerializer.Serialize(wrapper)
-	// log.Infof("Sending (bytes): %+v", toSendBytes)
-	p.streamManager.SendMessage(toSendBytes, destPeer)
+	go func() {
+		msgBytes := p.serializationManager.Serialize(toSend)
+		wrapper := message.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
+		// log.Infof("Sending: %+v", wrapper)
+		toSendBytes := appMsgSerializer.Serialize(wrapper)
+		// log.Infof("Sending (bytes): %+v", toSendBytes)
+		p.streamManager.SendMessage(toSendBytes, destPeer)
+	}()
 	return nil
 }
 
@@ -203,8 +207,11 @@ func RegisteredProtos() []protocol.ID {
 
 func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Stream) {
 	go func() {
-		t.Dial(targetPeer)
-		sendHandshakeMessage(t, destProtos, true)
+		if err := t.Dial(targetPeer); err != nil {
+			log.Errorf("Failed to establish temporary stream due to: %s", err.Reason())
+			return
+		}
+		sendHandshakeMessage(t, destProtos, TemporaryTunnel)
 		msgBytes := toSend.Serializer().Serialize(toSend)
 		msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
 		// log.Info("Sending message sideChannel")
@@ -215,13 +222,16 @@ func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sour
 }
 
 func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Stream) {
-	log.Infof("Dialing new node %s", toDial.Addr())
+	log.Warnf("Dialing new node %s", toDial.Addr())
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
 
 func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
-	wrapperProtocol := getProtocol(sourceProto)
-	wrapperProtocol.DialFailed(dialedPeer)
+	callerProto, ok := p.protocols.Load(sourceProto)
+	if !ok {
+		log.Panicf("Proto %d not found", sourceProto)
+	}
+	callerProto.(protocolValueType).DialFailed(dialedPeer)
 }
 
 func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer peer.Peer) bool {
@@ -329,12 +339,4 @@ func Start() {
 			*/
 		}
 	}
-}
-
-func getProtocol(protoID protocol.ID) internalProto.WrapperProtocol {
-	sourceProto, ok := p.protocols.Load(protoID)
-	if !ok {
-		panic(fmt.Sprintf("Protocol %d not registered", sourceProto))
-	}
-	return sourceProto.(internalProto.WrapperProtocol)
 }
