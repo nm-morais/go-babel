@@ -19,7 +19,10 @@ type Hyparview struct {
 	passiveView    []peer.Peer
 	pendingDials   map[string]bool
 	lastShuffleMsg ShuffleMessage
+	timeStart      time.Time
 }
+
+const joinTime = 10 * time.Second
 
 const protoID = 2000
 const activeViewSize = 5
@@ -56,6 +59,7 @@ func (h *Hyparview) Init() {
 }
 
 func (h *Hyparview) Start() {
+	h.timeStart = time.Now()
 	pkg.RegisterTimer(h.ID(), ShuffleTimer{timer: time.NewTimer(3 * time.Second)})
 	if h.contactNode.Equals(pkg.SelfPeer()) {
 		return
@@ -84,6 +88,7 @@ func (h *Hyparview) OutConnDown(peer peer.Peer) {
 }
 
 func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
+	delete(h.pendingDials, peer.ToString())
 	if sourceProto != h.ID() {
 		return false
 	}
@@ -94,7 +99,6 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	}
 
 	h.dropPeerFromPassiveView(peer)
-	delete(h.pendingDials, peer.ToString())
 	if h.isActiveViewFull() {
 		h.dropRandomElemFromActiveView()
 	}
@@ -154,7 +158,7 @@ func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.M
 
 	rndNodes := h.getRandomElementsFromView(1, h.activeView, fwdJoinMsg.OriginalSender, sender)
 	if len(rndNodes) == 0 { // only know original sender, act as if join message
-		log.Errorf("Cannot forward forwardJoin message, dialing %s", fwdJoinMsg.OriginalSender)
+		log.Errorf("Cannot forward forwardJoin message, dialing %s", fwdJoinMsg.OriginalSender.ToString())
 		h.dialNodeToActiveView(fwdJoinMsg.OriginalSender)
 		return
 	}
@@ -293,18 +297,19 @@ func (h *Hyparview) HandleShuffleReplyMessage(sender peer.Peer, m message.Messag
 // ---------------- Protocol handlers (timers) ----------------
 
 func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
-	if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {
-		toSend := JoinMessage{}
-		h.pendingDials[h.contactNode.ToString()] = true
-		pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
-		return
-	}
-
-	if !h.isActiveViewFull() && len(h.pendingDials)+len(h.activeView) <= activeViewSize && len(h.passiveView) > 0 {
-		log.Warn("Promoting node from passive view to active view")
-		aux := h.getRandomElementsFromView(1, h.passiveView)
-		if len(aux) > 0 {
-			h.dialNodeToActiveView(aux[0])
+	if time.Since(h.timeStart) > joinTime {
+		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {
+			toSend := JoinMessage{}
+			h.pendingDials[h.contactNode.ToString()] = true
+			pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
+			return
+		}
+		if !h.isActiveViewFull() && len(h.pendingDials)+len(h.activeView) <= activeViewSize && len(h.passiveView) > 0 {
+			log.Warn("Promoting node from passive view to active view")
+			aux := h.getRandomElementsFromView(1, h.passiveView)
+			if len(aux) > 0 {
+				h.dialNodeToActiveView(aux[0])
+			}
 		}
 	}
 
@@ -364,8 +369,6 @@ func (h *Hyparview) logHyparviewState() {
 }
 
 func (h *Hyparview) getRandomElementsFromView(amount int, view []peer.Peer, exclusions ...peer.Peer) []peer.Peer {
-
-	rand.Shuffle(len(view), func(i, j int) { view[i], view[j] = view[j], view[i] })
 
 	dest := make([]peer.Peer, len(view))
 	perm := rand.Perm(len(view))
