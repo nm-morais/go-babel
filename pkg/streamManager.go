@@ -116,18 +116,21 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 
 	log.Warnf("Dialing: %s", toDial.ToString())
 
-	/*
-		_, connUp := sm.activeTransports.Load(toDial.ToString())
-		if connUp {
-			callerProto, _ := p.protocols.Load(dialingProto)
-			callerProto.(protocolValueType).DialSuccess(dialingProto, toDial)
-			p.channelSubscribersMutex.Lock()
-			subs := p.channelSubscribers[toDial.ToString()]
-			subs[dialingProto] = true
-			p.channelSubscribers[toDial.ToString()] = subs
-			p.channelSubscribersMutex.Unlock()
+	_, connUp := sm.activeTransports.Load(toDial.ToString())
+	if connUp {
+		p.channelSubscribersMutex.Lock()
+		subs := p.channelSubscribers[toDial.ToString()]
+		log.Warnf("stream to %s was already active", toDial.ToString())
+		if subs == nil {
+			subs = make(map[protocol.ID]bool)
 		}
-	*/
+		subs[dialingProto] = true
+		p.channelSubscribers[toDial.ToString()] = subs
+		p.channelSubscribersMutex.Unlock()
+		callerProto, _ := p.protocols.Load(dialingProto)
+		callerProto.(protocolValueType).DialSuccess(dialingProto, toDial)
+		return
+	}
 
 	doneDialing, ok := sm.dialingTransports.Load(toDial.ToString())
 	if ok {
@@ -137,6 +140,7 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	}
 
 	sm.dialingTransportsMutex.Lock()
+
 	doneDialing, ok = sm.dialingTransports.Load(toDial.ToString())
 	if ok {
 		waitChan := doneDialing.(chan interface{})
@@ -157,7 +161,6 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 		dialError(dialingProto, toDial)
 		return
 	}
-	sm.dialingTransports.Delete(toDial.ToString())
 
 	// log.Infof("Done dialing node %s", toDial.Addr())
 	// log.Infof("Exchanging protos")
@@ -187,8 +190,8 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 		renew:  make(chan struct{}),
 	}
 	sm.hbChannels.Store(remotePeer.ToString(), hbChannel)
-	sm.hbChannels.Store(remotePeer.ToString(), hbChannel)
 	sm.activeTransports.Store(remotePeer.ToString(), stream)
+	sm.dialingTransports.Delete(toDial.ToString())
 
 	if !dialSuccess(dialingProto, handshakeMsg.Protos, remotePeer) {
 		log.Warn("No protocol accepted conn")

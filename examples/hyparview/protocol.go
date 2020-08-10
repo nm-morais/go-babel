@@ -67,10 +67,8 @@ func (h *Hyparview) Start() {
 
 func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
 	if h.isPeerInView(peer, h.activeView) {
-		panic("Was dialed by node in active view ")
-		return true
+		return false
 	}
-
 	if !h.isActiveViewFull() && len(h.activeView)+len(h.pendingDials) < activeViewSize {
 		h.dropPeerFromPassiveView(peer)
 		if h.isActiveViewFull() {
@@ -100,16 +98,22 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	}
 
 	h.addPeerToActiveView(peer)
+	h.logHyparviewState()
 	return true
 }
 
 func (h *Hyparview) DialFailed(peer peer.Peer) {
 	delete(h.pendingDials, peer.ToString())
+	log.Errorf("Failed to dial peer %s", peer.ToString())
+	h.logHyparviewState()
+
 }
 
 func (h *Hyparview) PeerDown(peer peer.Peer) {
 	h.dropPeerFromActiveView(peer)
 	log.Errorf("Peer %s down", peer.ToString())
+	h.logHyparviewState()
+
 }
 
 // ---------------- Protocol handlers (messages) ----------------
@@ -361,15 +365,24 @@ func (h *Hyparview) logHyparviewState() {
 		toLog += fmt.Sprintf("%s, ", p)
 	}
 	log.Info(toLog)
+	log.Info("-------------------------------------------")
 }
 
 func (h *Hyparview) getRandomElementsFromView(amount int, view []peer.Peer, exclusions ...peer.Peer) []peer.Peer {
 
 	rand.Shuffle(len(view), func(i, j int) { view[i], view[j] = view[j], view[i] })
+
+	dest := make([]peer.Peer, len(view))
+	perm := rand.Perm(len(view))
+	for i, v := range perm {
+		dest[v] = view[i]
+	}
+
 	var toSend []peer.Peer
-	for i := 0; i < len(view) && len(toSend) < amount; i++ {
+
+	for i := 0; i < len(dest) && len(toSend) < amount; i++ {
 		excluded := false
-		curr := view[i]
+		curr := dest[i]
 		for _, exclusion := range exclusions {
 			if exclusion.Equals(curr) { // skip exclusions
 				excluded = true
@@ -418,7 +431,7 @@ func (h *Hyparview) dialNodeToActiveView(peer peer.Peer) {
 	if h.isPeerInView(peer, h.activeView) || h.pendingDials[peer.ToString()] {
 		return
 	}
-	log.Info("dialing new node %s", peer.ToString())
+	log.Infof("dialing new node %s", peer.ToString())
 	pkg.Dial(peer, h.ID(), transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 	h.pendingDials[peer.ToString()] = true
 	h.logHyparviewState()
