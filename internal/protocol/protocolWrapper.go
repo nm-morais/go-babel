@@ -34,7 +34,7 @@ type WrapperProtocol struct {
 	dialSuccess     chan dialSuccessWithBoolReplyChan
 	inConnRequested chan inConnReqEventWithBoolReply
 	dialFailed      chan peer.Peer
-	connDown        chan peer.Peer
+	outConnDown     chan peer.Peer
 }
 
 const ChannelSize = 10 // buffer 10 events in channel
@@ -79,7 +79,7 @@ func NewWrapperProtocol(protocol protocol.Protocol) *WrapperProtocol {
 
 		// transport event channels
 		dialFailed:      make(chan peer.Peer),
-		connDown:        make(chan peer.Peer),
+		outConnDown:     make(chan peer.Peer),
 		dialSuccess:     make(chan dialSuccessWithBoolReplyChan),
 		inConnRequested: make(chan inConnReqEventWithBoolReply),
 	}
@@ -129,8 +129,8 @@ func (pw *WrapperProtocol) handleChannels() {
 			event.respChan <- pw.wrappedProtocol.DialSuccess(event.dialingProto, event.peer)
 		case peerDialed := <-pw.dialFailed:
 			pw.wrappedProtocol.DialFailed(peerDialed)
-		case failedPeer := <-pw.connDown:
-			pw.wrappedProtocol.PeerDown(failedPeer)
+		case failedPeer := <-pw.outConnDown:
+			pw.wrappedProtocol.OutConnDown(failedPeer)
 		// applicational events
 		case req := <-pw.requestChan:
 			req.respChan <- pw.handleRequest(req.req)
@@ -284,6 +284,6 @@ func (pw *WrapperProtocol) DialFailed(peer peer.Peer) {
 	pw.dialFailed <- peer
 }
 
-func (pw *WrapperProtocol) TransportFailure(peer peer.Peer) {
-	pw.connDown <- peer
+func (pw *WrapperProtocol) OutConnDown(peer peer.Peer) {
+	pw.outConnDown <- peer
 }

@@ -22,7 +22,7 @@ func NewTCPListener(listenAddr net.Addr) Stream {
 	return &TCPStream{listenAddr: listenAddr}
 }
 
-func NewTCPDialer(listenAddr net.Addr) Stream {
+func NewTCPDialer() Stream {
 	return &TCPStream{}
 }
 

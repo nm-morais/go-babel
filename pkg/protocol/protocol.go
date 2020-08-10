@@ -9,10 +9,11 @@ type Protocol interface {
 	Init()
 	Start()
 
-	// peer events
-	InConnRequested(peer peer.Peer) bool             // if true, will subscribe protocol to connectionEvents
-	DialSuccess(sourceProto ID, peer peer.Peer) bool // if true, will subscribe protocol to connectionEvents
+	// network events
+	InConnRequested(peer peer.Peer) bool // if true, will subscribe protocol to connectionEvents
 
+	DialSuccess(sourceProto ID, peer peer.Peer) bool // if true, will subscribe protocol to connectionEvents
 	DialFailed(peer peer.Peer)
-	PeerDown(peer peer.Peer)
+
+	OutConnDown(peer peer.Peer)
 }

@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/internal/notificationHub"
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
@@ -53,7 +54,7 @@ type ProtoManager struct {
 	serializationManager    *serialization.Manager
 	protocols               *sync.Map
 	protoIds                []protocol.ID
-	streamManager           StreamManager
+	streamManager           streamManager
 	channelSubscribers      map[string]map[protocol.ID]bool
 	channelSubscribersMutex *sync.Mutex
 	listener                transport.Stream
@@ -287,13 +288,13 @@ func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
 	return true
 }
 
-func warnTransportFailure(peer peer.Peer) {
+func outTransportFailure(peer peer.Peer) {
 	log.Warn("Handling transport failure from ", peer.ToString())
 	p.channelSubscribersMutex.Lock()
 	toNotify := p.channelSubscribers[peer.ToString()]
 	for protoID := range toNotify {
 		proto, _ := p.protocols.Load(protoID)
-		proto.(protocolValueType).TransportFailure(peer)
+		proto.(protocolValueType).OutConnDown(peer)
 	}
 	delete(p.channelSubscribers, peer.ToString())
 	p.channelSubscribersMutex.Unlock()
@@ -333,16 +334,22 @@ func Start() {
 	for {
 		select {
 		case <-logTicker.C:
-			/*
-				log.Info("------------- Protocol Manager state -------------")
-				var toLog string
-				toLog = "Active connections : "
-				p.activeTransports.Range(func(peer, conn interface{}) bool {
-					toLog += fmt.Sprintf("%s, ", peer.(string))
-					return true
-				})
-				log.Info(toLog)
-			*/
+			log.Info("------------- Protocol Manager state -------------")
+			var toLog string
+			toLog = "Inbound connections : "
+			p.streamManager.inboundTransports.Range(func(peer, conn interface{}) bool {
+				toLog += fmt.Sprintf("%s, ", peer.(string))
+				return true
+			})
+			log.Info(toLog)
+			toLog = ""
+			toLog = "outbound connections : "
+			p.streamManager.inboundTransports.Range(func(peer, conn interface{}) bool {
+				toLog += fmt.Sprintf("%s, ", peer.(string))
+				return true
+			})
+			log.Info(toLog)
+			log.Info("--------------------------------------------------")
 		}
 	}
 }

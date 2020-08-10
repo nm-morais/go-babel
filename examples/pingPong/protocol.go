@@ -38,7 +38,7 @@ func (m *PingPongProtocol) Init() {
 func (m *PingPongProtocol) Start() {
 	if pkg.SelfPeer().Addr().String() != m.contact.Addr().String() {
 		log.Infof("Dialing contact node")
-		pkg.Dial(m.contact, protoID, transport.NewTCPDialer(pkg.SelfPeer().Addr()))
+		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
 	} else {
 		log.Infof("I'm contact node")
 	}
@@ -49,10 +49,6 @@ func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
 	if peer.Addr().String() == m.contact.Addr().String() {
 		panic("contacting bootstrap node failed")
 	}
-}
-
-func (m *PingPongProtocol) PeerDown(peer peer.Peer) {
-	delete(m.activePeers, peer)
 }
 
 func (m *PingPongProtocol) handlePingMessage(sender peer.Peer, msg message.Message) {
@@ -99,4 +95,8 @@ func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) 
 
 func (m *PingPongProtocol) InConnRequested(peer peer.Peer) bool {
 	return true
+}
+
+func (m *PingPongProtocol) OutConnDown(peer peer.Peer) {
+	delete(m.activePeers, peer)
 }
