@@ -140,17 +140,19 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 	return nil
 }
 
-func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) errors.Error {
+func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) chan interface{} {
 	//log.Infof("Sending message of type %s", reflect.TypeOf(toSend))
+	errChan := make(chan interface{})
 	go func() {
 		msgBytes := p.serializationManager.Serialize(toSend)
 		wrapper := message.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
-		// log.Infof("Sending: %+v", wrapper)
+		//log.Infof("Sending %s to %s", reflect.TypeOf(toSend), destPeer.ToString())
 		toSendBytes := appMsgSerializer.Serialize(wrapper)
 		// log.Infof("Sending (bytes): %+v", toSendBytes)
 		p.streamManager.SendMessage(toSendBytes, destPeer)
+		close(errChan)
 	}()
-	return nil
+	return errChan
 }
 
 func SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
@@ -236,27 +238,30 @@ func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
 
 func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer peer.Peer) bool {
 	p.channelSubscribersMutex.Lock()
+	subs := p.channelSubscribers[dialedPeer.ToString()]
+	if subs == nil {
+		subs = make(map[protocol.ID]bool)
+	}
+
 	for _, destProtoID := range remoteProtos {
 		proto, ok := p.protocols.Load(destProtoID)
 		if ok {
 			convertedProto := proto.(protocolValueType)
 			if convertedProto.DialSuccess(dialerProto, dialedPeer) {
-				subs := p.channelSubscribers[dialedPeer.ToString()]
-				if subs == nil {
-					subs = make(map[protocol.ID]bool)
-				}
 				subs[convertedProto.ID()] = true
-				p.channelSubscribers[dialedPeer.ToString()] = subs
 			}
 		}
 	}
-	if len(p.channelSubscribers[dialedPeer.ToString()]) == 0 {
+
+	if len(subs) == 0 {
 		delete(p.channelSubscribers, dialedPeer.ToString())
 		p.channelSubscribersMutex.Unlock()
 		return false
 	}
+	p.channelSubscribers[dialedPeer.ToString()] = subs
 	p.channelSubscribersMutex.Unlock()
 	return true
+
 }
 
 func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
@@ -282,8 +287,8 @@ func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
 	return true
 }
 
-func handleTransportFailure(peer peer.Peer) {
-	log.Info("Handling transport failure from ", peer.ToString())
+func warnTransportFailure(peer peer.Peer) {
+	log.Warn("Handling transport failure from ", peer.ToString())
 	p.channelSubscribersMutex.Lock()
 	toNotify := p.channelSubscribers[peer.ToString()]
 	for protoID := range toNotify {
@@ -295,14 +300,15 @@ func handleTransportFailure(peer peer.Peer) {
 }
 
 func Disconnect(source protocol.ID, peer peer.Peer) {
+	log.Warnf("Proto %d disconnecting from peer %s", source, peer.ToString())
 	p.channelSubscribersMutex.Lock()
 	subs := p.channelSubscribers[peer.ToString()]
 	delete(subs, source)
 	if len(subs) == 0 {
+		log.Warnf("Disconnecting from %s", peer.ToString())
 		p.streamManager.Disconnect(peer)
 	}
 	p.channelSubscribersMutex.Unlock()
-	log.Warnf("Disconnecting from %s", peer.ToString())
 }
 
 func SelfPeer() peer.Peer {
