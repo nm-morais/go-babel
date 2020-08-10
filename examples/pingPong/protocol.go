@@ -90,7 +90,6 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	log.Infof("Connection established to peer %+v", peer.Addr().String())
 	if sourceProto == protoID {
-		log.Infof("Dial successful")
 		m.activePeers[peer] = true
 		pkg.RegisterTimer(protoID, PingTimer{timer: time.NewTimer(0 * time.Second)})
 		return true

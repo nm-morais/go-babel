@@ -78,10 +78,10 @@ func NewWrapperProtocol(protocol protocol.Protocol) *WrapperProtocol {
 		notificationChan: make(chan notification.Notification, ChannelSize),
 
 		// transport event channels
-		dialFailed:      make(chan peer.Peer, ChannelSize),
-		connDown:        make(chan peer.Peer, ChannelSize),
-		dialSuccess:     make(chan dialSuccessWithBoolReplyChan, ChannelSize), // interactive channel
-		inConnRequested: make(chan inConnReqEventWithBoolReply, ChannelSize),  // interactive channel
+		dialFailed:      make(chan peer.Peer),
+		connDown:        make(chan peer.Peer),
+		dialSuccess:     make(chan dialSuccessWithBoolReplyChan),
+		inConnRequested: make(chan inConnReqEventWithBoolReply),
 	}
 }
 
@@ -120,6 +120,7 @@ func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Re
 func (pw *WrapperProtocol) handleChannels() {
 	log.Info("Channel loop started")
 	for {
+		//log.Infof("New event")
 		select {
 		// net events
 		case event := <-pw.inConnRequested:
@@ -130,7 +131,6 @@ func (pw *WrapperProtocol) handleChannels() {
 			pw.wrappedProtocol.DialFailed(peerDialed)
 		case failedPeer := <-pw.connDown:
 			pw.wrappedProtocol.PeerDown(failedPeer)
-
 		// applicational events
 		case req := <-pw.requestChan:
 			req.respChan <- pw.handleRequest(req.req)

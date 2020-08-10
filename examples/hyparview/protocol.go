@@ -61,7 +61,6 @@ func (h *Hyparview) Start() {
 		return
 	}
 	toSend := JoinMessage{}
-	h.pendingDials[h.contactNode.ToString()] = true
 	log.Info("Sending join message...")
 	pkg.SendMessageTempTransport(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 }
@@ -85,7 +84,6 @@ func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
 }
 
 func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	log.Info("Dial success")
 	if sourceProto != h.ID() {
 		return false
 	}
@@ -121,7 +119,6 @@ func (h *Hyparview) HandleJoinMessage(sender peer.Peer, message message.Message)
 	if h.isActiveViewFull() {
 		h.dropRandomElemFromActiveView()
 	}
-	log.Info("dialed new node")
 	h.dialNodeToActiveView(sender)
 	if len(h.activeView) > 0 {
 		toSend := ForwardJoinMessage{
@@ -139,7 +136,7 @@ func (h *Hyparview) HandleJoinMessage(sender peer.Peer, message message.Message)
 
 func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.Message) {
 	fwdJoinMsg := message.(ForwardJoinMessage)
-	log.Warnf("Received forward join message with ttl = %d from %s", fwdJoinMsg.TTL, sender.ToString())
+	log.Infof("Received forward join message with ttl = %d from %s", fwdJoinMsg.TTL, sender.ToString())
 
 	if fwdJoinMsg.TTL == 0 || len(h.activeView) == 1 {
 		log.Errorf("Accepting forwardJoin message from %s", fwdJoinMsg.OriginalSender.ToString())
@@ -158,7 +155,7 @@ func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.M
 
 	rndNodes := h.getRandomElementsFromView(1, h.activeView, fwdJoinMsg.OriginalSender, sender)
 	if len(rndNodes) == 0 { // only know original sender, act as if join message
-		log.Errorf("Cannot forward forwardJoin message, dialing %s", rndNodes[0].ToString())
+		log.Errorf("Cannot forward forwardJoin message, dialing %s", fwdJoinMsg.OriginalSender)
 		h.dialNodeToActiveView(fwdJoinMsg.OriginalSender)
 		return
 	}
@@ -168,7 +165,7 @@ func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.M
 		OriginalSender: fwdJoinMsg.OriginalSender,
 	}
 
-	log.Warnf("Forwarding forwardJoin with TTL=%d message to : %s", toSend.TTL, rndNodes[0].ToString())
+	log.Infof("Forwarding forwardJoin with TTL=%d message to : %s", toSend.TTL, rndNodes[0].ToString())
 	h.sendMessage(toSend, rndNodes[0])
 }
 
@@ -418,13 +415,10 @@ func (h *Hyparview) dropPeerFromPassiveView(target peer.Peer) bool {
 }
 
 func (h *Hyparview) dialNodeToActiveView(peer peer.Peer) {
-	if h.isPeerInView(peer, h.activeView) {
+	if h.isPeerInView(peer, h.activeView) || h.pendingDials[peer.ToString()] {
 		return
 	}
-
-	if h.pendingDials[h.contactNode.ToString()] {
-		return
-	}
+	log.Info("dialing new node %s", peer.ToString())
 	pkg.Dial(peer, h.ID(), transport.NewTCPDialer(pkg.SelfPeer().Addr()))
 	h.pendingDials[peer.ToString()] = true
 	h.logHyparviewState()
@@ -489,9 +483,11 @@ func (h *Hyparview) dropRandomElemFromActiveView() {
 	removed := h.activeView[toRemove]
 	h.activeView = append(h.activeView[:toRemove], h.activeView[toRemove+1:]...)
 	h.addPeerToPassiveView(removed)
-	disconnectMsg := DisconnectMessage{}
-	h.sendMessage(disconnectMsg, removed)
-	pkg.Disconnect(h.ID(), removed)
+	go func() {
+		disconnectMsg := DisconnectMessage{}
+		<-h.sendMessage(disconnectMsg, removed)
+		pkg.Disconnect(h.ID(), removed)
+	}()
 	h.logHyparviewState()
 }
 
@@ -502,10 +498,8 @@ func (h *Hyparview) dropRandomElemFromPassiveView() {
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
-	if err := pkg.SendMessage(msg, target, h.ID(), []protocol.ID{h.ID()}); err != nil {
-		err.Log()
-	}
+func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) chan interface{} {
+	return pkg.SendMessage(msg, target, h.ID(), []protocol.ID{h.ID()})
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
