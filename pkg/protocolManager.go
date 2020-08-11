@@ -8,6 +8,7 @@ import (
 	"github.com/nm-morais/go-babel/internal/serialization"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
+	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
@@ -16,6 +17,8 @@ import (
 	"github.com/nm-morais/go-babel/pkg/timer"
 	"github.com/nm-morais/go-babel/pkg/transport"
 	log "github.com/sirupsen/logrus"
+	"io"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -54,10 +57,11 @@ type ProtoManager struct {
 	serializationManager    *serialization.Manager
 	protocols               *sync.Map
 	protoIds                []protocol.ID
-	streamManager           streamManager
+	streamManager           StreamManager
 	channelSubscribers      map[string]map[protocol.ID]bool
 	channelSubscribersMutex *sync.Mutex
 	listener                transport.Stream
+	logger                  *log.Logger
 }
 
 var p *ProtoManager
@@ -76,6 +80,7 @@ func InitProtoManager(configs configs.ProtocolManagerConfig, listener transport.
 		listener:                listener,
 		channelSubscribers:      make(map[string]map[protocol.ID]bool),
 		channelSubscribersMutex: &sync.Mutex{},
+		logger:                  logs.NewLogger("ProtoManager"),
 	}
 	p.serializationManager.RegisterSerializer(message.HeartbeatMessageType, message.HeartbeatSerializer{})
 	return p
@@ -85,14 +90,13 @@ func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 	_, ok := p.protocols.Load(protocol.ID())
 	for _, protoID := range reservedProtos {
 		if protocol.ID() == protoID {
-			log.Panicf("Trying to add protocol with invalid ID (reserved by internal mechanisms). Reserved protos: %+v", reservedProtos)
+			p.logger.Panicf("Trying to add protocol with invalid ID (reserved by internal mechanisms). Reserved protos: %+v", reservedProtos)
 		}
 	}
 
 	if ok {
 		return errors.FatalError(409, "Protocol already registered", ProtoManagerCaller)
 	}
-	log.Infof("Protocol %s registered", reflect.TypeOf(protocol))
 	protocolWrapper := internalProto.NewWrapperProtocol(protocol)
 	p.protocols.Store(protocol.ID(), protocolWrapper)
 	p.protoIds = append(p.protoIds, protocol.ID())
@@ -132,7 +136,7 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 	if !ok {
 		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
 	}
-	log.Infof("Protocol %d registered handler for msg %+v", protoID, reflect.TypeOf(message))
+	p.logger.Infof("Protocol %d registered handler for msg %+v", protoID, reflect.TypeOf(message))
 
 	p.serializationManager.RegisterSerializer(message.Type(), message.Serializer())
 	p.serializationManager.RegisterDeserializer(message.Type(), message.Deserializer())
@@ -142,14 +146,14 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 }
 
 func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) chan interface{} {
-	//log.Infof("Sending message of type %s", reflect.TypeOf(toSend))
+	//p.logger.Infof("Sending message of type %s", reflect.TypeOf(toSend))
 	errChan := make(chan interface{})
 	go func() {
 		msgBytes := p.serializationManager.Serialize(toSend)
 		wrapper := message.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
-		//log.Infof("Sending %s to %s", reflect.TypeOf(toSend), destPeer.ToString())
+		//p.logger.Infof("Sending %s to %s", reflect.TypeOf(toSend), destPeer.ToString())
 		toSendBytes := appMsgSerializer.Serialize(wrapper)
-		// log.Infof("Sending (bytes): %+v", toSendBytes)
+		// p.logger.Infof("Sending (bytes): %+v", toSendBytes)
 		p.streamManager.SendMessage(toSendBytes, destPeer)
 		close(errChan)
 	}()
@@ -208,31 +212,19 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func SendMessageTempTransport(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Stream) {
-	go func() {
-		if err := t.Dial(targetPeer); err != nil {
-			log.Errorf("Failed to establish temporary stream due to: %s", err.Reason())
-			return
-		}
-		sendHandshakeMessage(t, destProtos, TemporaryTunnel)
-		msgBytes := toSend.Serializer().Serialize(toSend)
-		msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
-		// log.Info("Sending message sideChannel")
-		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
-		_, _ = t.Write(wrappedBytes)
-		t.Close()
-	}()
+func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Stream) {
+	go p.streamManager.SendMessageSideStream(toSend, targetPeer, sourceProtoID, destProtos, t)
 }
 
 func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Stream) {
-	log.Warnf("Dialing new node %s", toDial.Addr())
+	p.logger.Warnf("Dialing new node %s", toDial.Addr())
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
 
 func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
 	callerProto, ok := p.protocols.Load(sourceProto)
 	if !ok {
-		log.Panicf("Proto %d not found", sourceProto)
+		p.logger.Panicf("Proto %d not found", sourceProto)
 	}
 	callerProto.(protocolValueType).DialFailed(dialedPeer)
 }
@@ -289,7 +281,7 @@ func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
 }
 
 func outTransportFailure(peer peer.Peer) {
-	log.Warn("Handling transport failure from ", peer.ToString())
+	p.logger.Warn("Handling transport failure from ", peer.ToString())
 	p.channelSubscribersMutex.Lock()
 	toNotify := p.channelSubscribers[peer.ToString()]
 	for protoID := range toNotify {
@@ -301,12 +293,12 @@ func outTransportFailure(peer peer.Peer) {
 }
 
 func Disconnect(source protocol.ID, peer peer.Peer) {
-	log.Warnf("Proto %d disconnecting from peer %s", source, peer.ToString())
+	p.logger.Warnf("Proto %d disconnecting from peer %s", source, peer.ToString())
 	p.channelSubscribersMutex.Lock()
 	subs := p.channelSubscribers[peer.ToString()]
 	delete(subs, source)
 	if len(subs) == 0 {
-		log.Warnf("Disconnecting from %s", peer.ToString())
+		p.logger.Warnf("Disconnecting from %s", peer.ToString())
 		p.streamManager.Disconnect(peer)
 	}
 	p.channelSubscribersMutex.Unlock()
@@ -316,7 +308,54 @@ func SelfPeer() peer.Peer {
 	return p.selfPeer
 }
 
+type NameHook struct {
+	name string
+}
+
+func setupLoggers() {
+	logFolder := p.config.LogFolder + p.listener.ListenAddr().String() + "/"
+	err := os.Mkdir(logFolder, 0777)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	allLogsFile, err := os.Create(logFolder + "all.log")
+	if err != nil {
+		log.Panic(err)
+	}
+	all := io.MultiWriter(os.Stdout, allLogsFile)
+
+	p.protocols.Range(func(key, proto interface{}) bool {
+		protoName := proto.(protocolValueType).Name()
+		protoFile, err := os.Create(logFolder + fmt.Sprintf("%s.log", protoName))
+		if err != nil {
+			log.Panic(err)
+		}
+		logger := proto.(protocolValueType).Logger()
+		mw := io.MultiWriter(all, protoFile)
+		logger.SetOutput(mw)
+		return true
+	})
+
+	protoManagerFile, err := os.Create(logFolder + "protoManager.log")
+	if err != nil {
+		log.Panic(err)
+	}
+	pmMw := io.MultiWriter(all, protoManagerFile)
+	p.logger.SetOutput(pmMw)
+	streamManagerFile, err := os.Create(logFolder + "streamManager.log")
+	if err != nil {
+		log.Panic(err)
+	}
+	streamManagerLogger := p.streamManager.Logger()
+	smMw := io.MultiWriter(all, streamManagerFile)
+	streamManagerLogger.SetOutput(smMw)
+	return
+}
+
 func Start() {
+
+	setupLoggers()
 
 	go p.streamManager.AcceptConnectionsAndNotify()
 
@@ -334,22 +373,7 @@ func Start() {
 	for {
 		select {
 		case <-logTicker.C:
-			log.Info("------------- Protocol Manager state -------------")
-			var toLog string
-			toLog = "Inbound connections : "
-			p.streamManager.inboundTransports.Range(func(peer, conn interface{}) bool {
-				toLog += fmt.Sprintf("%s, ", peer.(string))
-				return true
-			})
-			log.Info(toLog)
-			toLog = ""
-			toLog = "outbound connections : "
-			p.streamManager.inboundTransports.Range(func(peer, conn interface{}) bool {
-				toLog += fmt.Sprintf("%s, ", peer.(string))
-				return true
-			})
-			log.Info(toLog)
-			log.Info("--------------------------------------------------")
+
 		}
 	}
 }

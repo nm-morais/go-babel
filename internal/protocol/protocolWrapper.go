@@ -118,7 +118,6 @@ func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Re
 // channel handler
 
 func (pw *WrapperProtocol) handleChannels() {
-	log.Info("Channel loop started")
 	for {
 		//log.Infof("New event")
 		select {
@@ -249,13 +248,11 @@ func (pw *WrapperProtocol) ID() protocol.ID {
 }
 
 func (pw *WrapperProtocol) Start() {
-	log.Infof("Wrapper proto starting")
 	go pw.handleChannels()
 	pw.wrappedProtocol.Start()
 }
 
 func (pw *WrapperProtocol) Init() {
-	log.Infof("Wrapper proto initializing")
 	pw.wrappedProtocol.Init()
 }
 
@@ -286,4 +283,12 @@ func (pw *WrapperProtocol) DialFailed(peer peer.Peer) {
 
 func (pw *WrapperProtocol) OutConnDown(peer peer.Peer) {
 	pw.outConnDown <- peer
+}
+
+func (pw *WrapperProtocol) Logger() *log.Logger {
+	return pw.wrappedProtocol.Logger()
+}
+
+func (pw *WrapperProtocol) Name() string {
+	return pw.wrappedProtocol.Name()
 }

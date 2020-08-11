@@ -2,6 +2,7 @@ package pingPong
 
 import (
 	"github.com/nm-morais/go-babel/pkg"
+	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
@@ -12,20 +13,31 @@ import (
 )
 
 const protoID = 1000
+const name = "PingPong"
 
 type PingPongProtocol struct {
 	activePeers map[peer.Peer]bool
 	contact     peer.Peer
+	logger      *log.Logger
+}
+
+func NewPingPongProtocol(contact peer.Peer) protocol.Protocol {
+	return &PingPongProtocol{
+		contact: contact,
+		logger:  logs.NewLogger(name),
+	}
 }
 
 func (m *PingPongProtocol) ID() protocol.ID {
 	return protoID
 }
 
-func NewPingPongProtocol(contact peer.Peer) protocol.Protocol {
-	return &PingPongProtocol{
-		contact: contact,
-	}
+func (m *PingPongProtocol) Name() string {
+	return name
+}
+
+func (m *PingPongProtocol) Logger() *log.Logger {
+	return m.logger
 }
 
 func (m *PingPongProtocol) Init() {
@@ -37,15 +49,15 @@ func (m *PingPongProtocol) Init() {
 
 func (m *PingPongProtocol) Start() {
 	if pkg.SelfPeer().Addr().String() != m.contact.Addr().String() {
-		log.Infof("Dialing contact node")
+		m.logger.Infof("Dialing contact node")
 		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
 	} else {
-		log.Infof("I'm contact node")
+		m.logger.Infof("I'm contact node")
 	}
 }
 
 func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
-	log.Infof("Dial failed")
+	m.logger.Infof("Dial failed")
 	if peer.Addr().String() == m.contact.Addr().String() {
 		panic("contacting bootstrap node failed")
 	}
@@ -53,27 +65,27 @@ func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
 
 func (m *PingPongProtocol) handlePingMessage(sender peer.Peer, msg message.Message) {
 	pingMsg := msg.(Ping)
-	log.Infof("Got ping message, content : %s", pingMsg.Payload)
+	m.logger.Infof("Got ping message, content : %s", pingMsg.Payload)
 	response := Pong{Payload: pingMsg.Payload + "Pong"}
-	log.Infof("Sending Pong message, content : %s", response.Payload)
+	m.logger.Infof("Sending Pong message, content : %s", response.Payload)
 	pkg.SendMessage(response, sender, protoID, []protocol.ID{protoID})
 }
 
 func (m *PingPongProtocol) handlePongMessage(sender peer.Peer, msg message.Message) {
 	pongMsg := msg.(Pong)
-	log.Infof("Got pong message, content : %s", pongMsg.Payload)
+	m.logger.Infof("Got pong message, content : %s", pongMsg.Payload)
 }
 
 func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
-	//log.Infof("ping timer trigger")
+	//m.logger.Infof("ping timer trigger")
 	pingMsg := Ping{Payload: "Ping"}
 	if len(m.activePeers) == 0 {
-		log.Infof("No active peers on ping timer")
+		m.logger.Infof("No active peers on ping timer")
 		return
 	}
 
 	for remotePeer := range m.activePeers {
-		log.Infof("Sending pingMessage to %s", remotePeer.Addr().String())
+		m.logger.Infof("Sending pingMessage to %s", remotePeer.Addr().String())
 		//pkg.Write(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		for i := 0; i < 1; i++ {
 			pkg.SendMessage(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
@@ -84,7 +96,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 }
 
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	log.Infof("Connection established to peer %+v", peer.Addr().String())
+	m.logger.Infof("Connection established to peer %+v", peer.Addr().String())
 	if sourceProto == protoID {
 		m.activePeers[peer] = true
 		pkg.RegisterTimer(protoID, PingTimer{timer: time.NewTimer(0 * time.Second)})

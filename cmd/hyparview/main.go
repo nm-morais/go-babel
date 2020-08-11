@@ -34,6 +34,7 @@ func main() {
 		panic(err)
 	}
 	config := configs.ProtocolManagerConfig{
+		LogFolder:             "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
 		HandshakeTimeout:      1 * time.Second,
 		HeartbeatTickDuration: 1 * time.Second,
 		DialTimeout:           1 * time.Second,

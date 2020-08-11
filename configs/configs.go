@@ -7,6 +7,7 @@ import (
 )
 
 type ProtocolManagerConfig struct {
+	LogFolder             string
 	HandshakeTimeout      time.Duration
 	HeartbeatTickDuration time.Duration
 	ConnectionReadTimeout time.Duration

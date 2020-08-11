@@ -56,7 +56,7 @@ func (t *TCPStream) Dial(peer peer.Peer) errors.Error {
 	}
 
 	t.conn = conn
-	t.mr = NewMessageReader(conn)
+	t.mr = NewMessageReader(conn) //TODO this can be changed to be in the streamManager, and thus connections are more generic
 	t.mw = NewMessageWriter(conn)
 
 	return nil
