@@ -24,8 +24,6 @@ import (
 	"time"
 )
 
-const configFilePath = "./configs/config.json"
-
 const ProtoManagerCaller = "ProtoManager"
 
 /*
@@ -80,7 +78,7 @@ func InitProtoManager(configs configs.ProtocolManagerConfig, listener transport.
 		listener:                listener,
 		channelSubscribers:      make(map[string]map[protocol.ID]bool),
 		channelSubscribersMutex: &sync.Mutex{},
-		logger:                  logs.NewLogger("ProtoManager"),
+		logger:                  logs.NewLogger(ProtoManagerCaller),
 	}
 	p.serializationManager.RegisterSerializer(message.HeartbeatMessageType, message.HeartbeatSerializer{})
 	return p
@@ -373,7 +371,22 @@ func Start() {
 	for {
 		select {
 		case <-logTicker.C:
-
+			var toLog string
+			toLog = "inbound connections : "
+			log.Info("------------- Protocol Manager state -------------")
+			p.streamManager.(streamManager).inboundTransports.Range(func(peer, conn interface{}) bool {
+				toLog += fmt.Sprintf("%s, ", peer.(string))
+				return true
+			})
+			log.Info(toLog)
+			toLog = ""
+			toLog = "outbound connections : "
+			p.streamManager.(streamManager).outboundTransports.Range(func(peer, conn interface{}) bool {
+				toLog += fmt.Sprintf("%s, ", peer.(string))
+				return true
+			})
+			log.Info(toLog)
+			log.Info("--------------------------------------------------")
 		}
 	}
 }
