@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	internalMsg "github.com/nm-morais/go-babel/internal/message"
 	"github.com/nm-morais/go-babel/internal/messageIO"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -31,7 +32,7 @@ type streamManager struct {
 	logger *log.Logger
 }
 
-var appMsgDeserializer = message.AppMessageWrapperSerializer{}
+var appMsgDeserializer = internalMsg.AppMessageWrapperSerializer{}
 
 const (
 	TemporaryTunnel = 0
@@ -51,7 +52,7 @@ type hbTimerRoutineChannels = struct {
 type StreamManager interface {
 	AcceptConnectionsAndNotify()
 	DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, stream stream.Stream)
-	SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, stream stream.Stream)
+	SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, stream stream.Stream) errors.Error
 	Disconnect(peer peer.Peer)
 	SendMessage(message []byte, peer peer.Peer) errors.Error
 	MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, []time.Duration))
@@ -149,19 +150,25 @@ func (sm streamManager) Logger() *log.Logger {
 	return sm.logger
 }
 
-func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, stream stream.Stream) {
+func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, stream stream.Stream) errors.Error {
 	if err := stream.Dial(toDial); err != nil {
-		sm.logger.Errorf("Failed to establish temporary stream due to: %s", err.Reason())
-		return
+		return err
 	}
 	mw := messageIO.NewMessageWriter(stream)
-	sm.sendHandshakeMessage(mw, destProtos, TemporaryTunnel)
+	err := sm.sendHandshakeMessage(mw, destProtos, TemporaryTunnel)
+	if err != nil {
+		return err
+	}
 	msgBytes := toSend.Serializer().Serialize(toSend)
-	msgWrapper := message.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
+	msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
 	// sm.logger.Info("Sending message sideChannel")
 	wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
-	_, _ = mw.Write(wrappedBytes)
+	_, wErr := mw.Write(wrappedBytes)
+	if wErr != nil {
+		errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+	}
 	stream.Close()
+	return nil
 }
 
 func (sm streamManager) AcceptConnectionsAndNotify() {
@@ -344,7 +351,7 @@ func (sm streamManager) Disconnect(peer peer.Peer) {
 func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Stream, newPeer peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Handling peer stream %s", newPeer.ToString())
 	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.ToString())
-	deserializer := message.AppMessageWrapperSerializer{}
+	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
 		t.SetReadTimeout(p.config.ConnectionReadTimeout)
 		msgBuf := make([]byte, 2048)
@@ -362,8 +369,8 @@ func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Str
 
 		//sm.logger.Infof("Read %d bytes from %s", n, newPeer.ToString())
 		deserialized := deserializer.Deserialize(msgBuf[:n])
-		protoMsg := deserialized.(*message.AppMessageWrapper)
-		if protoMsg.MessageID == message.HeartbeatMessageType {
+		protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
+		if protoMsg.MessageID == internalMsg.HeartbeatMessageType {
 			continue
 		}
 
@@ -404,8 +411,8 @@ func (sm streamManager) startConnHeartbeat(transport io.Writer, peer peer.Peer) 
 	finishChan := hbChannel.finish
 	renewChan := hbChannel.renew
 
-	hbMessage := message.HeartbeatMessage{}
-	wrapperMessage := &message.AppMessageWrapper{
+	hbMessage := internalMsg.HeartbeatMessage{}
+	wrapperMessage := &internalMsg.AppMessageWrapper{
 		MessageID:   hbMessage.Type(),
 		SourceProto: hbProtoInternalID,
 		DestProtos:  []protocol.ID{hbProtoInternalID},
@@ -511,29 +518,29 @@ func (sm streamManager) handleTmpStream(newPeer peer.Peer, transport io.Reader) 
 	}
 }
 
-func (sm streamManager) waitForHandshakeMessage(transport io.Reader) (*message.ProtoHandshakeMessage, errors.Error) {
+func (sm streamManager) waitForHandshakeMessage(transport io.Reader) (*internalMsg.ProtoHandshakeMessage, errors.Error) {
 	msgBytes := make([]byte, 2048)
 	read, err := transport.Read(msgBytes)
 	if err != nil {
 		return nil, errors.NonFatalError(500, err.Error(), streamManagerCaller)
 	}
-	msg := protoMsgSerializer.Deserialize(msgBytes[:read]).(message.ProtoHandshakeMessage)
+	msg := protoMsgSerializer.Deserialize(msgBytes[:read]).(internalMsg.ProtoHandshakeMessage)
 	//sm.logger.Infof("Received proto exchange message %+v", msg)
 	return &msg, nil
 }
 
-func (sm streamManager) readAppMessage(stream io.Reader) (*message.AppMessageWrapper, errors.Error) {
+func (sm streamManager) readAppMessage(stream io.Reader) (*internalMsg.AppMessageWrapper, errors.Error) {
 	msgBuf := make([]byte, 2048)
 	n, err := stream.Read(msgBuf)
 	if err != nil {
 		return nil, errors.NonFatalError(500, err.Error(), streamManagerCaller)
 	}
-	deserialized := appMsgDeserializer.Deserialize(msgBuf[:n]).(*message.AppMessageWrapper)
+	deserialized := appMsgDeserializer.Deserialize(msgBuf[:n]).(*internalMsg.AppMessageWrapper)
 	return deserialized, nil
 }
 
 func (sm streamManager) sendHandshakeMessage(transport io.Writer, destProtos []protocol.ID, chanType uint8) errors.Error {
-	var toSend = message.NewProtoHandshakeMessage(destProtos, SelfPeer().Addr(), chanType)
+	var toSend = internalMsg.NewProtoHandshakeMessage(destProtos, SelfPeer().Addr(), chanType)
 	msgBytes := protoMsgSerializer.Serialize(toSend)
 	_, err := transport.Write(msgBytes)
 	if err != nil {

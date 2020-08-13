@@ -3,6 +3,7 @@ package hyparview
 import (
 	"fmt"
 	"github.com/nm-morais/go-babel/pkg"
+	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
@@ -36,7 +37,7 @@ const Ka = 3
 const Kp = 2
 const name = "Hyparview"
 
-func NewHYparviewProtocol(contactNode peer.Peer) protocol.Protocol {
+func NewHyparviewProtocol(contactNode peer.Peer) protocol.Protocol {
 	return &Hyparview{
 		contactNode:  contactNode,
 		activeView:   make([]peer.Peer, 0, activeViewSize),
@@ -517,7 +518,7 @@ func (h *Hyparview) dropRandomElemFromActiveView() {
 	h.addPeerToPassiveView(removed)
 	go func() {
 		disconnectMsg := DisconnectMessage{}
-		<-h.sendMessage(disconnectMsg, removed)
+		h.sendMessage(disconnectMsg, removed)
 		pkg.Disconnect(h.ID(), removed)
 	}()
 	h.logHyparviewState()
@@ -530,10 +531,22 @@ func (h *Hyparview) dropRandomElemFromPassiveView() {
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) chan interface{} {
-	return pkg.SendMessage(msg, target, h.ID(), []protocol.ID{h.ID()})
+func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
+	pkg.SendMessage(msg, target, h.ID(), []protocol.ID{h.ID()})
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
 	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewTCPDialer())
+}
+
+func (h *Hyparview) MessageDelivered(message message.Message, peer peer.Peer) {
+	if message.Type() == DisconnectMessageType {
+		pkg.Disconnect(h.ID(), peer)
+		h.logger.Debugf("Disconnecting from %s", message, peer.ToString())
+	}
+	h.logger.Debugf("Message %+v was sent to %s", message, peer.ToString())
+}
+
+func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
+
 }

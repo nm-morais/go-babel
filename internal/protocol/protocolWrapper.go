@@ -25,16 +25,20 @@ type WrapperProtocol struct {
 	timerHandlers        map[timer.ID]handlers.TimerHandler
 
 	// channels (internal only)
+	// applicational
 	messageChan      chan messageWithPeer
 	requestChan      chan reqWithReplyCHan
 	timerChan        chan timer.Timer
 	replyChan        chan request.Reply
 	notificationChan chan notification.Notification
 
-	dialSuccess     chan dialSuccessWithBoolReplyChan
-	inConnRequested chan inConnReqEventWithBoolReply
-	dialFailed      chan peer.Peer
-	outConnDown     chan peer.Peer
+	// connection events
+	messageDeliveryErrChan chan messageWithPeerAndErr
+	messageDeliveredChan   chan messageWithPeer
+	dialSuccess            chan dialSuccessWithBoolReplyChan
+	inConnRequested        chan inConnReqEventWithBoolReply
+	dialFailed             chan peer.Peer
+	outConnDown            chan peer.Peer
 }
 
 const ChannelSize = 10 // buffer 10 events in channel
@@ -52,6 +56,12 @@ type dialSuccessWithBoolReplyChan struct {
 type messageWithPeer struct {
 	peer    peer.Peer
 	message message.Message
+}
+
+type messageWithPeerAndErr struct {
+	peer    peer.Peer
+	message message.Message
+	err     errors.Error
 }
 
 type inConnReqEventWithBoolReply struct {
@@ -130,6 +140,11 @@ func (pw *WrapperProtocol) handleChannels() {
 			pw.wrappedProtocol.DialFailed(peerDialed)
 		case failedPeer := <-pw.outConnDown:
 			pw.wrappedProtocol.OutConnDown(failedPeer)
+		case deliverySucc := <-pw.messageDeliveredChan:
+			pw.wrappedProtocol.MessageDelivered(deliverySucc.message, deliverySucc.peer)
+		case failedDelivery := <-pw.messageDeliveryErrChan:
+			pw.wrappedProtocol.MessageDeliveryErr(failedDelivery.message, failedDelivery.peer, failedDelivery.err)
+
 		// applicational events
 		case req := <-pw.requestChan:
 			req.respChan <- pw.handleRequest(req.req)
@@ -242,6 +257,21 @@ func (pw *WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handle
 }
 
 //
+
+func (pw *WrapperProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
+	pw.messageDeliveredChan <- messageWithPeer{
+		peer:    peer,
+		message: message,
+	}
+}
+
+func (pw *WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
+	pw.messageDeliveryErrChan <- messageWithPeerAndErr{
+		peer:    peer,
+		message: message,
+		err:     error,
+	}
+}
 
 func (pw *WrapperProtocol) ID() protocol.ID {
 	return pw.wrappedProtocol.ID()

@@ -2,19 +2,20 @@ package message
 
 import (
 	"encoding/binary"
+	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 )
 
 var appMessageWrapperSerializer = AppMessageWrapperSerializer{}
 
 type AppMessageWrapper struct {
-	MessageID       ID
+	MessageID       message.ID
 	SourceProto     protocol.ID
 	DestProtos      []protocol.ID
 	WrappedMsgBytes []byte
 }
 
-func NewAppMessageWrapper(mId ID, sourceProto protocol.ID, destProtos []protocol.ID, wrappedMsgBytes []byte) Message {
+func NewAppMessageWrapper(mId message.ID, sourceProto protocol.ID, destProtos []protocol.ID, wrappedMsgBytes []byte) message.Message {
 	return &AppMessageWrapper{
 		MessageID:       mId,
 		SourceProto:     sourceProto,
@@ -23,15 +24,15 @@ func NewAppMessageWrapper(mId ID, sourceProto protocol.ID, destProtos []protocol
 	}
 }
 
-func (msg *AppMessageWrapper) Type() ID {
+func (msg *AppMessageWrapper) Type() message.ID {
 	return msg.MessageID
 }
 
-func (msg *AppMessageWrapper) Serializer() Serializer {
+func (msg *AppMessageWrapper) Serializer() message.Serializer {
 	return appMessageWrapperSerializer
 }
 
-func (msg *AppMessageWrapper) Deserializer() Deserializer {
+func (msg *AppMessageWrapper) Deserializer() message.Deserializer {
 	return appMessageWrapperSerializer
 }
 
@@ -39,7 +40,7 @@ func (msg *AppMessageWrapper) Deserializer() Deserializer {
 
 type AppMessageWrapperSerializer struct{}
 
-func (serializer AppMessageWrapperSerializer) Serialize(toSerialize Message) []byte {
+func (serializer AppMessageWrapperSerializer) Serialize(toSerialize message.Message) []byte {
 	wrapperMsg := toSerialize.(*AppMessageWrapper)
 	msgSize := 0
 	msgSize += 2 + 2 + 2 + 2*len(wrapperMsg.DestProtos)
@@ -55,7 +56,7 @@ func (serializer AppMessageWrapperSerializer) Serialize(toSerialize Message) []b
 	return append(buf, wrapperMsg.WrappedMsgBytes...)
 }
 
-func (serializer AppMessageWrapperSerializer) Deserialize(buf []byte) Message {
+func (serializer AppMessageWrapperSerializer) Deserialize(buf []byte) message.Message {
 	msg := &AppMessageWrapper{}
 	msg.MessageID = binary.BigEndian.Uint16(buf)
 	msg.SourceProto = binary.BigEndian.Uint16(buf[2:])

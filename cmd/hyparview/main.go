@@ -46,6 +46,6 @@ func main() {
 		panic(err)
 	}
 
-	pkg.RegisterProtocol(hyparview.NewHYparviewProtocol(peer.NewPeer(contactNodeAddr)))
+	pkg.RegisterProtocol(hyparview.NewHyparviewProtocol(peer.NewPeer(contactNodeAddr)))
 	pkg.Start()
 }

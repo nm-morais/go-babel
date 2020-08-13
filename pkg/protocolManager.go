@@ -3,6 +3,7 @@ package pkg
 import (
 	"fmt"
 	"github.com/nm-morais/go-babel/configs"
+	internalMsg "github.com/nm-morais/go-babel/internal/message"
 	"github.com/nm-morais/go-babel/internal/notificationHub"
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
 	"github.com/nm-morais/go-babel/internal/serialization"
@@ -63,8 +64,8 @@ type ProtoManager struct {
 }
 
 var p *ProtoManager
-var protoMsgSerializer = message.ProtoHandshakeMessageSerializer{}
-var appMsgSerializer = message.AppMessageWrapperSerializer{}
+var protoMsgSerializer = internalMsg.ProtoHandshakeMessageSerializer{}
+var appMsgSerializer = internalMsg.AppMessageWrapperSerializer{}
 
 func InitProtoManager(configs configs.ProtocolManagerConfig, listener stream.Stream) *ProtoManager {
 	p = &ProtoManager{
@@ -80,7 +81,7 @@ func InitProtoManager(configs configs.ProtocolManagerConfig, listener stream.Str
 		channelSubscribersMutex: &sync.Mutex{},
 		logger:                  logs.NewLogger(ProtoManagerCaller),
 	}
-	p.serializationManager.RegisterSerializer(message.HeartbeatMessageType, message.HeartbeatSerializer{})
+	p.serializationManager.RegisterSerializer(internalMsg.HeartbeatMessageType, internalMsg.HeartbeatSerializer{})
 	return p
 }
 
@@ -93,7 +94,7 @@ func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 	}
 
 	if ok {
-		return errors.FatalError(409, "Protocol already registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d already registered", protocol.ID())
 	}
 	protocolWrapper := internalProto.NewWrapperProtocol(protocol)
 	p.protocols.Store(protocol.ID(), protocolWrapper)
@@ -104,7 +105,7 @@ func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 func RegisterNotificationHandler(protoID protocol.ID, notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if ok {
-		return errors.FatalError(409, "Protocol already registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d already registered", protoID)
 	}
 	p.notificationHub.AddListener(notificationID, proto.(protocolValueType))
 	proto.(protocolValueType).RegisterNotificationHandler(notificationID, handler)
@@ -114,7 +115,7 @@ func RegisterNotificationHandler(protoID protocol.ID, notificationID notificatio
 func RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.TimerHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", protoID)
 	}
 	proto.(protocolValueType).RegisterTimerHandler(timer, handler)
 	return nil
@@ -123,7 +124,7 @@ func RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.
 func RegisterRequestHandler(protoID protocol.ID, request request.ID, handler handlers.RequestHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", protoID)
 	}
 	proto.(protocolValueType).RegisterRequestHandler(request, handler)
 	return nil
@@ -132,7 +133,7 @@ func RegisterRequestHandler(protoID protocol.ID, request request.ID, handler han
 func RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", protoID)
 	}
 	p.logger.Infof("Protocol %d registered handler for msg %+v", protoID, reflect.TypeOf(message))
 
@@ -143,29 +144,35 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 	return nil
 }
 
-func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) chan interface{} {
-	//p.logger.Infof("Sending message of type %s", reflect.TypeOf(toSend))
-	errChan := make(chan interface{})
+func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) {
+	proto, ok := p.protocols.Load(origin)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", origin)
+	}
 	go func() {
+		//p.logger.Infof("Sending message of type %s", reflect.TypeOf(toSend))
 		msgBytes := p.serializationManager.Serialize(toSend)
-		wrapper := message.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
+		wrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
 		//p.logger.Infof("Sending %s to %s", reflect.TypeOf(toSend), destPeer.ToString())
 		toSendBytes := appMsgSerializer.Serialize(wrapper)
 		// p.logger.Infof("Sending (bytes): %+v", toSendBytes)
-		p.streamManager.SendMessage(toSendBytes, destPeer)
-		close(errChan)
+		err := p.streamManager.SendMessage(toSendBytes, destPeer)
+		if err != nil {
+			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
+			return
+		}
+		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
 	}()
-	return errChan
 }
 
 func SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
 	_, ok := p.protocols.Load(origin)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", origin)
 	}
 	proto, ok := p.protocols.Load(destination)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", origin)
 	}
 
 	go func() {
@@ -179,11 +186,11 @@ func SendRequest(request request.Request, origin protocol.ID, destination protoc
 func SendRequestReply(reply request.Reply, origin protocol.ID, destination protocol.ID) errors.Error {
 	_, ok := p.protocols.Load(origin)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", origin)
 	}
 	proto, ok := p.protocols.Load(destination)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", origin)
 	}
 	proto.(protocolValueType).DeliverRequestReply(reply)
 	return nil
@@ -197,7 +204,7 @@ func SendNotification(notification notification.Notification) errors.Error {
 func RegisterTimer(origin protocol.ID, timer timer.Timer) errors.Error {
 	callerProto, ok := p.protocols.Load(origin)
 	if !ok {
-		return errors.FatalError(409, "Protocol not registered", ProtoManagerCaller)
+		p.logger.Panicf("Protocol %d not registered", origin)
 	}
 	go func() { // TODO can be improved to use single routine instead of routine per channel
 		timer.Wait()
@@ -215,7 +222,19 @@ func MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, [
 }
 
 func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
-	go p.streamManager.SendMessageSideStream(toSend, targetPeer, sourceProtoID, destProtos, t)
+	callerProto, ok := p.protocols.Load(sourceProtoID)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", sourceProtoID)
+	}
+	go func() {
+		err := p.streamManager.SendMessageSideStream(toSend, targetPeer, sourceProtoID, destProtos, t)
+		if err != nil {
+			callerProto.(protocolValueType).MessageDeliveryErr(toSend, targetPeer, err)
+			return
+		}
+		callerProto.(protocolValueType).MessageDelivered(toSend, targetPeer)
+	}()
+
 }
 
 func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t stream.Stream) {

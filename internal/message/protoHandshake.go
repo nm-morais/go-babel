@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/binary"
+	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	log "github.com/sirupsen/logrus"
 	"net"
@@ -15,7 +16,7 @@ type ProtoHandshakeMessage struct {
 	Protos     []protocol.ID
 }
 
-func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr, temporaryConn uint8) Message {
+func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr, temporaryConn uint8) message.Message {
 	return ProtoHandshakeMessage{
 		ListenAddr: listenAddr,
 		Protos:     protos,
@@ -23,21 +24,21 @@ func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr, tempora
 	}
 }
 
-func (msg ProtoHandshakeMessage) Type() ID {
+func (msg ProtoHandshakeMessage) Type() message.ID {
 	panic("implement me")
 }
 
 type ProtoHandshakeMessageSerializer struct{}
 
-func (msg ProtoHandshakeMessage) Serializer() Serializer {
+func (msg ProtoHandshakeMessage) Serializer() message.Serializer {
 	return protoHandshakeMessageSerializer
 }
 
-func (msg ProtoHandshakeMessage) Deserializer() Deserializer {
+func (msg ProtoHandshakeMessage) Deserializer() message.Deserializer {
 	return protoHandshakeMessageSerializer
 }
 
-func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
+func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []byte {
 	protoMsg := message.(ProtoHandshakeMessage)
 	msgSize := 2*len(protoMsg.Protos) + 2 + 1
 	buf := make([]byte, msgSize)
@@ -54,7 +55,7 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message Message) []byte {
 	return toSend
 }
 
-func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) Message {
+func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Message {
 	newMsg := ProtoHandshakeMessage{}
 	bufPos := 0
 	newMsg.TunnelType = buf[0]

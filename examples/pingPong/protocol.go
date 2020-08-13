@@ -2,6 +2,7 @@ package pingPong
 
 import (
 	"github.com/nm-morais/go-babel/pkg"
+	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
@@ -26,6 +27,14 @@ func NewPingPongProtocol(contact peer.Peer) protocol.Protocol {
 		contact: contact,
 		logger:  logs.NewLogger(name),
 	}
+}
+
+func (m *PingPongProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
+	m.logger.Debugf("Message %+v was sent to %s", message, peer.ToString())
+}
+
+func (m *PingPongProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
+	m.logger.Warnf("Message %+v was not sent to %s due to:", message, peer, error.ToString())
 }
 
 func (m *PingPongProtocol) ID() protocol.ID {
