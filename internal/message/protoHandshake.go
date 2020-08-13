@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	log "github.com/sirupsen/logrus"
 	"net"
 )
 
@@ -70,8 +69,6 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 	listenAddrStr := string(buf[bufPos:])
 	listenAddr, err := net.ResolveTCPAddr("tcp4", listenAddrStr)
 	if err != nil {
-		log.Info(buf)
-		log.Error(err)
 		panic("Addr %s is invalid listen addr")
 	}
 	newMsg.ListenAddr = listenAddr

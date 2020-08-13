@@ -8,7 +8,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
-	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"net"
 	"time"
@@ -28,7 +27,6 @@ func main() {
 	if randPort {
 		portVar = rand.Intn(maxPort-minPort) + minPort
 	}
-	log.Info("Local Addr: ", fmt.Sprintf("localhost:%d", portVar))
 	listenAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:%d", portVar))
 	if err != nil {
 		panic(err)

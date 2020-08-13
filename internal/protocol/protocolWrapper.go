@@ -81,11 +81,13 @@ func NewWrapperProtocol(protocol protocol.Protocol) *WrapperProtocol {
 		timerHandlers:        make(map[timer.ID]handlers.TimerHandler),
 
 		// applicational event channels
-		messageChan:      make(chan messageWithPeer, ChannelSize),
-		requestChan:      make(chan reqWithReplyCHan, ChannelSize),
-		replyChan:        make(chan request.Reply, ChannelSize),
-		timerChan:        make(chan timer.Timer, ChannelSize),
-		notificationChan: make(chan notification.Notification, ChannelSize),
+		messageChan:            make(chan messageWithPeer, ChannelSize),
+		requestChan:            make(chan reqWithReplyCHan, ChannelSize),
+		replyChan:              make(chan request.Reply, ChannelSize),
+		timerChan:              make(chan timer.Timer, ChannelSize),
+		notificationChan:       make(chan notification.Notification, ChannelSize),
+		messageDeliveredChan:   make(chan messageWithPeer, ChannelSize),
+		messageDeliveryErrChan: make(chan messageWithPeerAndErr, ChannelSize),
 
 		// transport event channels
 		dialFailed:      make(chan peer.Peer),

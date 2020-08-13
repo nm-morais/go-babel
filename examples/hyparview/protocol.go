@@ -12,6 +12,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/timer"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
+	"reflect"
 	"time"
 )
 
@@ -78,7 +79,7 @@ func (h *Hyparview) Start() {
 		return
 	}
 	toSend := JoinMessage{}
-	log.Info("Sending join message...")
+	h.logger.Info("Sending join message...")
 	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
 }
 
@@ -124,17 +125,29 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	return true
 }
 
+func (h *Hyparview) DialFailed(peer peer.Peer) {
+	delete(h.pendingDials, peer.ToString())
+	h.logger.Errorf("Failed to dial peer %s", peer.ToString())
+	h.logHyparviewState()
+}
+
+func (h *Hyparview) MessageDelivered(message message.Message, peer peer.Peer) {
+	if message.Type() == DisconnectMessageType {
+		pkg.Disconnect(h.ID(), peer)
+		h.logger.Infof("Disconnecting from %s", message, peer.ToString())
+	}
+	h.logger.Infof("Message %+v was sent to %s", message, peer.ToString())
+}
+
+func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
+	h.logger.Warnf("Message %s was not sent to %s because: ", reflect.TypeOf(message), peer.ToString(), error.Reason())
+}
+
 func (h *Hyparview) printMeasurements(peer peer.Peer, measurements []time.Duration) {
 	h.logger.Infof("Measurements to %s", peer.ToString())
 	for i := 0; i < len(measurements); i++ {
 		h.logger.Infof("%d : %d microsec", i, measurements[i].Microseconds())
 	}
-}
-
-func (h *Hyparview) DialFailed(peer peer.Peer) {
-	delete(h.pendingDials, peer.ToString())
-	h.logger.Errorf("Failed to dial peer %s", peer.ToString())
-	h.logHyparviewState()
 }
 
 // ---------------- Protocol handlers (messages) ----------------
@@ -537,16 +550,4 @@ func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
 	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewTCPDialer())
-}
-
-func (h *Hyparview) MessageDelivered(message message.Message, peer peer.Peer) {
-	if message.Type() == DisconnectMessageType {
-		pkg.Disconnect(h.ID(), peer)
-		h.logger.Debugf("Disconnecting from %s", message, peer.ToString())
-	}
-	h.logger.Debugf("Message %+v was sent to %s", message, peer.ToString())
-}
-
-func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
-
 }

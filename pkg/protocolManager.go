@@ -178,21 +178,8 @@ func SendRequest(request request.Request, origin protocol.ID, destination protoc
 	go func() {
 		respChan := proto.(protocolValueType).DeliverRequest(request)
 		reply := <-respChan
-		SendRequestReply(reply, destination, origin)
+		proto.(protocolValueType).DeliverRequestReply(reply)
 	}()
-	return nil
-}
-
-func SendRequestReply(reply request.Reply, origin protocol.ID, destination protocol.ID) errors.Error {
-	_, ok := p.protocols.Load(origin)
-	if !ok {
-		p.logger.Panicf("Protocol %d not registered", origin)
-	}
-	proto, ok := p.protocols.Load(destination)
-	if !ok {
-		p.logger.Panicf("Protocol %d not registered", origin)
-	}
-	proto.(protocolValueType).DeliverRequestReply(reply)
 	return nil
 }
 
@@ -242,6 +229,47 @@ func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t stream.Stream) {
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
 
+func Disconnect(source protocol.ID, peer peer.Peer) {
+	go func() {
+		p.logger.Warnf("Proto %d disconnecting from peer %s", source, peer.ToString())
+		p.channelSubscribersMutex.Lock()
+		subs := p.channelSubscribers[peer.ToString()]
+		delete(subs, source)
+		if len(subs) == 0 {
+			p.logger.Warnf("Disconnecting from %s", peer.ToString())
+			p.streamManager.Disconnect(peer)
+		}
+		p.channelSubscribersMutex.Unlock()
+	}()
+}
+
+func SelfPeer() peer.Peer {
+	return p.selfPeer
+}
+
+func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
+	p.channelSubscribersMutex.Lock()
+	subs := p.channelSubscribers[dialer.ToString()]
+	if subs == nil {
+		subs = make(map[protocol.ID]bool)
+	}
+	for _, remoteProtoID := range remoteProtos {
+		if proto, ok := p.protocols.Load(remoteProtoID); ok {
+			if proto.(protocolValueType).InConnRequested(dialer) {
+				subs[proto.(protocolValueType).ID()] = true
+			}
+		}
+	}
+	if len(subs) == 0 {
+		delete(p.channelSubscribers, dialer.ToString())
+		p.channelSubscribersMutex.Unlock()
+		return false
+	}
+	p.channelSubscribers[dialer.ToString()] = subs
+	p.channelSubscribersMutex.Unlock()
+	return true
+}
+
 func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
 	callerProto, ok := p.protocols.Load(sourceProto)
 	if !ok {
@@ -278,29 +306,6 @@ func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer
 
 }
 
-func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
-	p.channelSubscribersMutex.Lock()
-	subs := p.channelSubscribers[dialer.ToString()]
-	if subs == nil {
-		subs = make(map[protocol.ID]bool)
-	}
-	for _, remoteProtoID := range remoteProtos {
-		if proto, ok := p.protocols.Load(remoteProtoID); ok {
-			if proto.(protocolValueType).InConnRequested(dialer) {
-				subs[proto.(protocolValueType).ID()] = true
-			}
-		}
-	}
-	if len(subs) == 0 {
-		delete(p.channelSubscribers, dialer.ToString())
-		p.channelSubscribersMutex.Unlock()
-		return false
-	}
-	p.channelSubscribers[dialer.ToString()] = subs
-	p.channelSubscribersMutex.Unlock()
-	return true
-}
-
 func outTransportFailure(peer peer.Peer) {
 	p.logger.Warn("Handling transport failure from ", peer.ToString())
 	p.channelSubscribersMutex.Lock()
@@ -311,22 +316,6 @@ func outTransportFailure(peer peer.Peer) {
 	}
 	delete(p.channelSubscribers, peer.ToString())
 	p.channelSubscribersMutex.Unlock()
-}
-
-func Disconnect(source protocol.ID, peer peer.Peer) {
-	p.logger.Warnf("Proto %d disconnecting from peer %s", source, peer.ToString())
-	p.channelSubscribersMutex.Lock()
-	subs := p.channelSubscribers[peer.ToString()]
-	delete(subs, source)
-	if len(subs) == 0 {
-		p.logger.Warnf("Disconnecting from %s", peer.ToString())
-		p.streamManager.Disconnect(peer)
-	}
-	p.channelSubscribersMutex.Unlock()
-}
-
-func SelfPeer() peer.Peer {
-	return p.selfPeer
 }
 
 type NameHook struct {
@@ -378,6 +367,8 @@ func Start() {
 
 	setupLoggers()
 
+	p.logger.Info("Local Addr: ", p.listener.ListenAddr().String())
+
 	go p.streamManager.AcceptConnectionsAndNotify()
 
 	p.protocols.Range(func(_, proto interface{}) bool {
@@ -390,26 +381,5 @@ func Start() {
 		return true
 	})
 
-	logTicker := time.NewTicker(time.Second * 3)
-	for {
-		select {
-		case <-logTicker.C:
-			var toLog string
-			toLog = "inbound connections : "
-			p.logger.Info("------------- Protocol Manager state -------------")
-			p.streamManager.(streamManager).inboundTransports.Range(func(peer, conn interface{}) bool {
-				toLog += fmt.Sprintf("%s, ", peer.(string))
-				return true
-			})
-			p.logger.Info(toLog)
-			toLog = ""
-			toLog = "outbound connections : "
-			p.streamManager.(streamManager).outboundTransports.Range(func(peer, conn interface{}) bool {
-				toLog += fmt.Sprintf("%s, ", peer.(string))
-				return true
-			})
-			p.logger.Info(toLog)
-			p.logger.Info("--------------------------------------------------")
-		}
-	}
+	select {}
 }
