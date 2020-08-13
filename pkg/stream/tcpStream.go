@@ -1,4 +1,4 @@
-package transport
+package stream
 
 import (
 	"github.com/nm-morais/go-babel/pkg/errors"
@@ -14,8 +14,6 @@ type TCPStream struct {
 	listenAddr net.Addr
 	conn       *net.TCPConn
 	l          net.Listener
-	mw         *MessageWriter
-	mr         *MessageReader
 }
 
 func NewTCPListener(listenAddr net.Addr) Stream {
@@ -56,18 +54,16 @@ func (t *TCPStream) Dial(peer peer.Peer) errors.Error {
 	}
 
 	t.conn = conn
-	t.mr = NewMessageReader(conn) //TODO this can be changed to be in the streamManager, and thus connections are more generic
-	t.mw = NewMessageWriter(conn)
 
 	return nil
 }
 
 func (t *TCPStream) Write(msgBytes []byte) (int, error) {
-	return t.mw.Write(msgBytes)
+	return t.conn.Write(msgBytes)
 }
 
 func (t *TCPStream) Read(msgBytes []byte) (int, error) {
-	return t.mr.Read(msgBytes)
+	return t.conn.Read(msgBytes)
 }
 
 func (t *TCPStream) Close() errors.Error {
@@ -90,12 +86,8 @@ func (l TCPListener) Accept() (Stream, errors.Error) {
 	if err != nil {
 		return nil, errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 	}
-	mr := NewMessageReader(conn)
-	mw := NewMessageWriter(conn)
 	return &TCPStream{
 		listenAddr: l.listener.Addr(),
 		conn:       conn.(*net.TCPConn),
-		mw:         mw,
-		mr:         mr,
 	}, nil
 }

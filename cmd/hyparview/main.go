@@ -7,7 +7,7 @@ import (
 	"github.com/nm-morais/go-babel/examples/hyparview"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	"github.com/nm-morais/go-babel/pkg/transport"
+	"github.com/nm-morais/go-babel/pkg/stream"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"net"
@@ -40,7 +40,7 @@ func main() {
 		DialTimeout:           1 * time.Second,
 		ConnectionReadTimeout: 5 * time.Second,
 	}
-	pkg.InitProtoManager(config, transport.NewTCPListener(listenAddr))
+	pkg.InitProtoManager(config, stream.NewTCPListener(listenAddr))
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1200")
 	if err != nil {
 		panic(err)

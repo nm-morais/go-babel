@@ -7,8 +7,8 @@ import (
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	"github.com/nm-morais/go-babel/pkg/transport"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"time"
@@ -78,7 +78,7 @@ func (h *Hyparview) Start() {
 	}
 	toSend := JoinMessage{}
 	log.Info("Sending join message...")
-	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
+	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
 }
 
 func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
@@ -89,7 +89,7 @@ func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
 		return false
 	}
 	h.pendingDials[peer.ToString()] = true
-	pkg.Dial(peer, h.ID(), transport.NewTCPDialer())
+	pkg.Dial(peer, h.ID(), stream.NewTCPDialer())
 	return true
 }
 
@@ -117,14 +117,23 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 
 	h.addPeerToActiveView(peer)
 	h.logHyparviewState()
+
+	pkg.MeasureLatencyTo(5, peer, h.printMeasurements)
+
 	return true
+}
+
+func (h *Hyparview) printMeasurements(peer peer.Peer, measurements []time.Duration) {
+	h.logger.Infof("Measurements to %s", peer.ToString())
+	for i := 0; i < len(measurements); i++ {
+		h.logger.Infof("%d : %d microsec", i, measurements[i].Microseconds())
+	}
 }
 
 func (h *Hyparview) DialFailed(peer peer.Peer) {
 	delete(h.pendingDials, peer.ToString())
 	h.logger.Errorf("Failed to dial peer %s", peer.ToString())
 	h.logHyparviewState()
-
 }
 
 // ---------------- Protocol handlers (messages) ----------------
@@ -309,11 +318,14 @@ func (h *Hyparview) HandleShuffleReplyMessage(sender peer.Peer, m message.Messag
 // ---------------- Protocol handlers (timers) ----------------
 
 func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
+	//h.logger.Info("Shuffle timer trigger")
+	pkg.RegisterTimer(h.ID(), ShuffleTimer{timer: time.NewTimer(5 * time.Second)})
+
 	if time.Since(h.timeStart) > joinTime {
 		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {
 			toSend := JoinMessage{}
 			h.pendingDials[h.contactNode.ToString()] = true
-			pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, transport.NewTCPDialer())
+			pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
 			return
 		}
 		if !h.isActiveViewFull() && len(h.pendingDials)+len(h.activeView) <= activeViewSize && len(h.passiveView) > 0 {
@@ -324,9 +336,6 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 			}
 		}
 	}
-
-	//h.logger.Info("Shuffle timer trigger")
-	pkg.RegisterTimer(h.ID(), ShuffleTimer{timer: time.NewTimer(5 * time.Second)})
 
 	if len(h.activeView) == 0 {
 		h.logger.Info("No nodes to send shuffle message message to")
@@ -442,7 +451,7 @@ func (h *Hyparview) dialNodeToActiveView(peer peer.Peer) {
 		return
 	}
 	h.logger.Infof("dialing new node %s", peer.ToString())
-	pkg.Dial(peer, h.ID(), transport.NewTCPDialer())
+	pkg.Dial(peer, h.ID(), stream.NewTCPDialer())
 	h.pendingDials[peer.ToString()] = true
 	h.logHyparviewState()
 }
@@ -526,5 +535,5 @@ func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) chan inte
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
-	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, transport.NewTCPDialer())
+	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewTCPDialer())
 }

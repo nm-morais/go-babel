@@ -6,8 +6,8 @@ import (
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	"github.com/nm-morais/go-babel/pkg/transport"
 	log "github.com/sirupsen/logrus"
 	"time"
 )
@@ -50,7 +50,7 @@ func (m *PingPongProtocol) Init() {
 func (m *PingPongProtocol) Start() {
 	if pkg.SelfPeer().Addr().String() != m.contact.Addr().String() {
 		m.logger.Infof("Dialing contact node")
-		pkg.Dial(m.contact, protoID, transport.NewTCPDialer())
+		pkg.Dial(m.contact, protoID, stream.NewTCPDialer())
 	} else {
 		m.logger.Infof("I'm contact node")
 	}

@@ -7,7 +7,7 @@ import (
 	"github.com/nm-morais/go-babel/examples/pingPong"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	"github.com/nm-morais/go-babel/pkg/transport"
+	"github.com/nm-morais/go-babel/pkg/stream"
 	"net"
 	"time"
 )
@@ -26,7 +26,7 @@ func main() {
 		HeartbeatTickDuration: 1 * time.Second,
 		ConnectionReadTimeout: 3 * time.Second,
 	}
-	listener := transport.NewTCPListener(listenAddr)
+	listener := stream.NewTCPListener(listenAddr)
 	pkg.InitProtoManager(configs, listener)
 
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1234")

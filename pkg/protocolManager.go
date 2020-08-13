@@ -14,8 +14,8 @@ import (
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/request"
+	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	"github.com/nm-morais/go-babel/pkg/transport"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"os"
@@ -58,7 +58,7 @@ type ProtoManager struct {
 	streamManager           StreamManager
 	channelSubscribers      map[string]map[protocol.ID]bool
 	channelSubscribersMutex *sync.Mutex
-	listener                transport.Stream
+	listener                stream.Stream
 	logger                  *log.Logger
 }
 
@@ -66,7 +66,7 @@ var p *ProtoManager
 var protoMsgSerializer = message.ProtoHandshakeMessageSerializer{}
 var appMsgSerializer = message.AppMessageWrapperSerializer{}
 
-func InitProtoManager(configs configs.ProtocolManagerConfig, listener transport.Stream) *ProtoManager {
+func InitProtoManager(configs configs.ProtocolManagerConfig, listener stream.Stream) *ProtoManager {
 	p = &ProtoManager{
 		config:                  configs,
 		selfPeer:                peer.NewPeer(listener.ListenAddr()),
@@ -210,11 +210,15 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t transport.Stream) {
+func MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, []time.Duration)) {
+	go p.streamManager.MeasureLatencyTo(nrMessages, peer, callback)
+}
+
+func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
 	go p.streamManager.SendMessageSideStream(toSend, targetPeer, sourceProtoID, destProtos, t)
 }
 
-func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t transport.Stream) {
+func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t stream.Stream) {
 	p.logger.Warnf("Dialing new node %s", toDial.Addr())
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
@@ -373,20 +377,20 @@ func Start() {
 		case <-logTicker.C:
 			var toLog string
 			toLog = "inbound connections : "
-			log.Info("------------- Protocol Manager state -------------")
+			p.logger.Info("------------- Protocol Manager state -------------")
 			p.streamManager.(streamManager).inboundTransports.Range(func(peer, conn interface{}) bool {
 				toLog += fmt.Sprintf("%s, ", peer.(string))
 				return true
 			})
-			log.Info(toLog)
+			p.logger.Info(toLog)
 			toLog = ""
 			toLog = "outbound connections : "
 			p.streamManager.(streamManager).outboundTransports.Range(func(peer, conn interface{}) bool {
 				toLog += fmt.Sprintf("%s, ", peer.(string))
 				return true
 			})
-			log.Info(toLog)
-			log.Info("--------------------------------------------------")
+			p.logger.Info(toLog)
+			p.logger.Info("--------------------------------------------------")
 		}
 	}
 }

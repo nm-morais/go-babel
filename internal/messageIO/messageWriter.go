@@ -1,4 +1,4 @@
-package transport
+package messageIO
 
 import (
 	"encoding/binary"
