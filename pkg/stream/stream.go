@@ -1,10 +1,11 @@
 package stream
 
 import (
-	"github.com/nm-morais/go-babel/pkg/errors"
-	"github.com/nm-morais/go-babel/pkg/peer"
 	"net"
 	"time"
+
+	"github.com/nm-morais/go-babel/pkg/errors"
+	"github.com/nm-morais/go-babel/pkg/peer"
 )
 
 type Stream interface {

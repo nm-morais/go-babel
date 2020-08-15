@@ -3,13 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
+	"time"
+
 	. "github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/examples/pingPong"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
-	"net"
-	"time"
 )
 
 func main() {

@@ -116,7 +116,7 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 			p := make([]byte, 2048)
 			conn, err := net.Dial("udp", peer.ToString())
 			if err != nil {
-				sm.logger.Errorf("Some error %v\n", err)
+				sm.logger.Errorf("Dial error %v\n", err)
 				return
 			}
 			ts := time.Now().UnixNano()
@@ -125,27 +125,26 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 			_, err = conn.Write(p)
 
 			if err != nil {
-				sm.logger.Errorf("Some error %v\n", err)
+				sm.logger.Errorf("Error writing to udp conn: %v\n", err)
 				return
 			}
 
 			_, err = bufio.NewReader(conn).Read(p)
 			if err != nil {
-				sm.logger.Errorf("Some error %v\n", err)
+				sm.logger.Errorf("Read error: %v\n,", err)
 				return
 			}
 
 			echoTs := binary.BigEndian.Uint64(p)
-
 			sentTime := time.Unix(0, int64(echoTs))
-			timeTaken := time.Now().Sub(sentTime)
+			timeTaken := time.Since(sentTime)
 			sm.logger.Infof("Measured latency to %s:%d ms", peer.ToString(), timeTaken.Milliseconds())
 			measurementsLock.Lock()
 			measurements = append(measurements, timeTaken)
 			measurementsLock.Unlock()
 			err = conn.Close()
 			if err != nil {
-				sm.logger.Errorf("Some error %v\n", err)
+				sm.logger.Errorf("Close error %v\n", err)
 			}
 		}(curr)
 	}
