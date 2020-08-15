@@ -4,6 +4,11 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"net"
+	"sync"
+	"time"
+
 	internalMsg "github.com/nm-morais/go-babel/internal/message"
 	"github.com/nm-morais/go-babel/internal/messageIO"
 	"github.com/nm-morais/go-babel/pkg/errors"
@@ -13,10 +18,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/stream"
 	log "github.com/sirupsen/logrus"
-	"io"
-	"net"
-	"sync"
-	"time"
 )
 
 type streamManager struct {
@@ -104,7 +105,8 @@ func (sm streamManager) startEchoServer(addr net.Addr) {
 
 func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, []time.Duration)) {
 	wg := sync.WaitGroup{}
-	measurements := make([]time.Duration, nrMessages)
+	measurementsLock := &sync.Mutex{}
+	measurements := make([]time.Duration, 0, nrMessages)
 	sm.logger.Infof("Measuring latency to:", peer.ToString())
 	wg.Add(nrMessages)
 	for i := 0; i < nrMessages; i++ {
@@ -124,11 +126,13 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 
 			if err != nil {
 				sm.logger.Errorf("Some error %v\n", err)
+				return
 			}
 
 			_, err = bufio.NewReader(conn).Read(p)
 			if err != nil {
 				sm.logger.Errorf("Some error %v\n", err)
+				return
 			}
 
 			echoTs := binary.BigEndian.Uint64(p)
@@ -136,7 +140,9 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 			sentTime := time.Unix(0, int64(echoTs))
 			timeTaken := time.Now().Sub(sentTime)
 			sm.logger.Infof("Measured latency to %s:%d ms", peer.ToString(), timeTaken.Milliseconds())
-			measurements[threadNr] = timeTaken
+			measurementsLock.Lock()
+			measurements = append(measurements, timeTaken)
+			measurementsLock.Unlock()
 			err = conn.Close()
 			if err != nil {
 				sm.logger.Errorf("Some error %v\n", err)

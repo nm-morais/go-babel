@@ -1,11 +1,12 @@
 package stream
 
 import (
+	"net"
+	"time"
+
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
-	"net"
-	"time"
 )
 
 const TCPTransportCaller = "TCPTransportCaller"

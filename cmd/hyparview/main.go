@@ -3,14 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
+	"net"
+	"time"
+
 	"github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/examples/hyparview"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
-	"math/rand"
-	"net"
-	"time"
 )
 
 func main() {
