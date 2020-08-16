@@ -2,6 +2,12 @@ package pkg
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"reflect"
+	"sync"
+	"time"
+
 	"github.com/nm-morais/go-babel/configs"
 	internalMsg "github.com/nm-morais/go-babel/internal/message"
 	"github.com/nm-morais/go-babel/internal/notificationHub"
@@ -18,11 +24,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	log "github.com/sirupsen/logrus"
-	"io"
-	"os"
-	"reflect"
-	"sync"
-	"time"
 )
 
 const ProtoManagerCaller = "ProtoManager"
@@ -318,10 +319,6 @@ func outTransportFailure(peer peer.Peer) {
 	p.channelSubscribersMutex.Unlock()
 }
 
-type NameHook struct {
-	name string
-}
-
 func setupLoggers() {
 	logFolder := p.config.LogFolder + p.listener.ListenAddr().String() + "/"
 	err := os.Mkdir(logFolder, 0777)
@@ -360,7 +357,6 @@ func setupLoggers() {
 	streamManagerLogger := p.streamManager.Logger()
 	smMw := io.MultiWriter(all, streamManagerFile)
 	streamManagerLogger.SetOutput(smMw)
-	return
 }
 
 func Start() {

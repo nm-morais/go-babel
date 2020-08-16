@@ -2,9 +2,10 @@ package hyparview
 
 import (
 	"encoding/binary"
+	"net"
+
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	"net"
 )
 
 const JoinMessageType = 2000

@@ -2,22 +2,24 @@ package message
 
 import (
 	"encoding/binary"
+
 	"github.com/nm-morais/go-babel/pkg/message"
+	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"net"
+	"github.com/nm-morais/go-babel/pkg/serialization"
 )
 
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
 
 type ProtoHandshakeMessage struct {
 	TunnelType uint8
-	ListenAddr net.Addr
+	Peer       peer.Peer
 	Protos     []protocol.ID
 }
 
-func NewProtoHandshakeMessage(protos []protocol.ID, listenAddr net.Addr, temporaryConn uint8) message.Message {
+func NewProtoHandshakeMessage(protos []protocol.ID, peer peer.Peer, temporaryConn uint8) message.Message {
 	return ProtoHandshakeMessage{
-		ListenAddr: listenAddr,
+		Peer:       peer,
 		Protos:     protos,
 		TunnelType: temporaryConn,
 	}
@@ -50,7 +52,7 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []
 		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
 		bufPos += 2
 	}
-	toSend := append(buf, []byte(protoMsg.ListenAddr.String())...)
+	toSend := append(buf, serialization.SerializePeer(protoMsg.Peer)...)
 	return toSend
 }
 
@@ -66,11 +68,7 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])
 		bufPos += 2
 	}
-	listenAddrStr := string(buf[bufPos:])
-	listenAddr, err := net.ResolveTCPAddr("tcp4", listenAddrStr)
-	if err != nil {
-		panic("Addr %s is invalid listen addr")
-	}
-	newMsg.ListenAddr = listenAddr
+	_, peer := serialization.DeserializePeer(buf[bufPos:])
+	newMsg.Peer = peer
 	return newMsg
 }

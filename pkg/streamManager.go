@@ -93,13 +93,12 @@ func (sm streamManager) startEchoServer(addr net.Addr) {
 		if err != nil {
 			continue
 		}
-		sm.logger.Infof("Got TS %d via UDP", binary.BigEndian.Uint64(buf))
-
-		n, err = pc.WriteTo(buf[:n], addr)
+		// sm.logger.Infof("Got TS %d via UDP", binary.BigEndian.Uint64(buf))
+		_, err = pc.WriteTo(buf[:n], addr)
 		if err != nil {
 			sm.logger.Error(err)
 		}
-		sm.logger.Info("Replied to TS via UDP")
+		// sm.logger.Info("Replied to TS via UDP")
 	}
 }
 
@@ -107,7 +106,7 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 	wg := sync.WaitGroup{}
 	measurementsLock := &sync.Mutex{}
 	measurements := make([]time.Duration, 0, nrMessages)
-	sm.logger.Infof("Measuring latency to:", peer.ToString())
+	//sm.logger.Infof("Measuring latency to:", peer.ToString())
 	wg.Add(nrMessages)
 	for i := 0; i < nrMessages; i++ {
 		curr := i
@@ -116,22 +115,22 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 			p := make([]byte, 2048)
 			conn, err := net.Dial("udp", peer.ToString())
 			if err != nil {
-				sm.logger.Errorf("Dial error %v\n", err)
+				sm.logger.Debugf("Dial error %v\n", err)
 				return
 			}
 			ts := time.Now().UnixNano()
 			binary.BigEndian.PutUint64(p, uint64(ts))
-			sm.logger.Info("Sending TS via UDP")
+			//sm.logger.Debug("Sending TS via UDP")
 			_, err = conn.Write(p)
 
 			if err != nil {
-				sm.logger.Errorf("Error writing to udp conn: %v\n", err)
+				sm.logger.Debugf("Error writing to udp conn: %v", err)
 				return
 			}
 
 			_, err = bufio.NewReader(conn).Read(p)
 			if err != nil {
-				sm.logger.Errorf("Read error: %v\n,", err)
+				sm.logger.Debugf("Read error: %v", err)
 				return
 			}
 
@@ -200,7 +199,7 @@ func (sm streamManager) AcceptConnectionsAndNotify() {
 			sm.logStreamManagerState()
 			continue
 		}
-		remotePeer := peer.NewPeer(handshakeMsg.ListenAddr)
+		remotePeer := handshakeMsg.Peer
 		//sm.logger.Infof("Got handshake message %+v from peer %s", handshakeMsg, remotePeer.ToString())
 		if handshakeMsg.TunnelType == TemporaryTunnel {
 			go sm.handleTmpStream(remotePeer, mr)
@@ -334,10 +333,24 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 }
 
 func (sm streamManager) SendMessage(message []byte, peer peer.Peer) errors.Error {
+	if peer == nil {
+		sm.logger.Panic("Peer is nil")
+	}
+
 	outboundStream, ok := sm.outboundTransports.Load(peer.ToString())
 	if !ok {
-		return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+		doneDialing, ok := sm.dialingTransports.Load(peer.ToString())
+		if !ok {
+			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+		}
+		waitChan := doneDialing.(chan interface{})
+		<-waitChan
+		_, ok = sm.outboundTransports.Load(peer.ToString())
+		if !ok {
+			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+		}
 	}
+
 	sm.renewHBTimer(peer)
 	_, err := outboundStream.(outboundStreamValueType).mw.Write(message)
 	if err != nil {
@@ -556,7 +569,7 @@ func (sm streamManager) readAppMessage(stream io.Reader) (*internalMsg.AppMessag
 }
 
 func (sm streamManager) sendHandshakeMessage(transport io.Writer, destProtos []protocol.ID, chanType uint8) errors.Error {
-	var toSend = internalMsg.NewProtoHandshakeMessage(destProtos, SelfPeer().Addr(), chanType)
+	var toSend = internalMsg.NewProtoHandshakeMessage(destProtos, SelfPeer(), chanType)
 	msgBytes := protoMsgSerializer.Serialize(toSend)
 	_, err := transport.Write(msgBytes)
 	if err != nil {

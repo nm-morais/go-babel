@@ -7,7 +7,6 @@ import (
 
 type MessageReader struct {
 	reader io.Reader
-	carry  []byte
 	buf    []byte
 }
 

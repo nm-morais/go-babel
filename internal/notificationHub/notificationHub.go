@@ -1,10 +1,11 @@
 package notificationHub
 
 import (
+	"sync"
+
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"sync"
 )
 
 type NotificationHub interface {

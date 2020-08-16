@@ -2,6 +2,10 @@ package hyparview
 
 import (
 	"fmt"
+	"math/rand"
+	"reflect"
+	"time"
+
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -11,9 +15,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	log "github.com/sirupsen/logrus"
-	"math/rand"
-	"reflect"
-	"time"
 )
 
 type Hyparview struct {
@@ -396,7 +397,7 @@ func (h *Hyparview) logHyparviewState() {
 	}
 	h.logger.Info(toLog)
 	toLog = "Pending dials: "
-	for p, _ := range h.pendingDials {
+	for p := range h.pendingDials {
 		toLog += fmt.Sprintf("%s, ", p)
 	}
 	h.logger.Info(toLog)

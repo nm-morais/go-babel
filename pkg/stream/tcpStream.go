@@ -14,7 +14,6 @@ const TCPTransportCaller = "TCPTransportCaller"
 type TCPStream struct {
 	listenAddr net.Addr
 	conn       *net.TCPConn
-	l          net.Listener
 }
 
 func NewTCPListener(listenAddr net.Addr) Stream {

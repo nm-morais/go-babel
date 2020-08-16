@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/binary"
+
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 )

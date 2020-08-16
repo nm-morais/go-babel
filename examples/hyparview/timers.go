@@ -1,8 +1,9 @@
 package hyparview
 
 import (
-	"github.com/nm-morais/go-babel/pkg/timer"
 	"time"
+
+	"github.com/nm-morais/go-babel/pkg/timer"
 )
 
 const ShuffleTimerID = 2001
