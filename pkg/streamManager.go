@@ -137,7 +137,7 @@ func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callbac
 			echoTs := binary.BigEndian.Uint64(p)
 			sentTime := time.Unix(0, int64(echoTs))
 			timeTaken := time.Since(sentTime)
-			sm.logger.Infof("Measured latency to %s:%d ms", peer.ToString(), timeTaken.Milliseconds())
+			//sm.logger.Infof("Measured latency to %s:%d ms", peer.ToString(), timeTaken.Milliseconds())
 			measurementsLock.Lock()
 			measurements = append(measurements, timeTaken)
 			measurementsLock.Unlock()
