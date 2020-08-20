@@ -321,6 +321,7 @@ func outTransportFailure(peer peer.Peer) {
 
 func setupLoggers() {
 	logFolder := p.config.LogFolder + p.listener.ListenAddr().String() + "/"
+	os.RemoveAll(logFolder)
 	err := os.Mkdir(logFolder, 0777)
 	if err != nil {
 		log.Panic(err)
