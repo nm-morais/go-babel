@@ -2,8 +2,9 @@ package logs
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // formatter adds default fields to each log entry.
@@ -23,7 +24,8 @@ func NewLogger(owner string) *log.Logger {
 	logger.SetFormatter(&formatter{
 		owner: owner,
 		lf: &log.TextFormatter{
-			ForceColors:     true,
+			DisableColors:   true,
+			ForceColors:     false,
 			FullTimestamp:   true,
 			TimestampFormat: time.StampMilli,
 		},
