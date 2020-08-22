@@ -57,7 +57,7 @@ type StreamManager interface {
 	SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, stream stream.Stream) errors.Error
 	Disconnect(peer peer.Peer)
 	SendMessage(message []byte, peer peer.Peer) errors.Error
-	MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, []time.Duration))
+	MeasureLatencyTo(nrMessages int, retries int, timeBetweenTries time.Duration, peer peer.Peer, callback func(peer.Peer, []time.Duration, errors.Error))
 	Logger() *log.Logger
 }
 
@@ -102,53 +102,52 @@ func (sm streamManager) startEchoServer(addr net.Addr) {
 	}
 }
 
-func (sm streamManager) MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, []time.Duration)) {
-	wg := sync.WaitGroup{}
-	measurementsLock := &sync.Mutex{}
+func (sm streamManager) MeasureLatencyTo(nrMessages int, retries int, timeBetweenTries time.Duration, peer peer.Peer, callback func(peer.Peer, []time.Duration, errors.Error)) {
 	measurements := make([]time.Duration, 0, nrMessages)
 	//sm.logger.Infof("Measuring latency to:", peer.ToString())
-	wg.Add(nrMessages)
-	for i := 0; i < nrMessages; i++ {
-		curr := i
-		go func(threadNr int) {
-			defer wg.Done()
-			p := make([]byte, 2048)
-			conn, err := net.Dial("udp", peer.ToString())
-			if err != nil {
-				sm.logger.Debugf("Dial error %v\n", err)
-				return
-			}
-			ts := time.Now().UnixNano()
-			binary.BigEndian.PutUint64(p, uint64(ts))
-			//sm.logger.Debug("Sending TS via UDP")
-			_, err = conn.Write(p)
-
-			if err != nil {
-				sm.logger.Debugf("Error writing to udp conn: %v", err)
-				return
-			}
-
-			_, err = bufio.NewReader(conn).Read(p)
-			if err != nil {
-				sm.logger.Debugf("Read error: %v", err)
-				return
-			}
-
-			echoTs := binary.BigEndian.Uint64(p)
-			sentTime := time.Unix(0, int64(echoTs))
-			timeTaken := time.Since(sentTime)
-			//sm.logger.Infof("Measured latency to %s:%d ms", peer.ToString(), timeTaken.Milliseconds())
-			measurementsLock.Lock()
-			measurements = append(measurements, timeTaken)
-			measurementsLock.Unlock()
-			err = conn.Close()
-			if err != nil {
-				sm.logger.Errorf("Close error %v\n", err)
-			}
-		}(curr)
+	conn, err := net.Dial("udp", peer.ToString())
+	if err != nil {
+		defer callback(peer, measurements, errors.NonFatalError(500, err.Error(), streamManagerCaller))
+		sm.logger.Errorf("Dial error %v\n", err)
+		return
 	}
-	wg.Wait()
-	callback(peer, measurements)
+
+	p := make([]byte, 2048)
+	for i := 0; len(measurements) < nrMessages && i < retries; i++ {
+		ts := time.Now().UnixNano()
+		binary.BigEndian.PutUint64(p, uint64(ts))
+		//sm.logger.Debug("Sending TS via UDP")
+		_, err = conn.Write(p)
+
+		if err != nil {
+			sm.logger.Errorf("Error writing to udp conn: %v", err)
+			continue
+		}
+
+		_, err = bufio.NewReader(conn).Read(p)
+		if err != nil {
+			sm.logger.Errorf("Read error: %v", err)
+			continue
+		}
+
+		echoTs := binary.BigEndian.Uint64(p)
+		sentTime := time.Unix(0, int64(echoTs))
+		timeTaken := time.Since(sentTime)
+		//sm.logger.Infof("Measured latency to %s:%d ms", peer.ToString(), timeTaken.Milliseconds())
+		measurements = append(measurements, timeTaken)
+		time.Sleep(timeBetweenTries)
+	}
+	err = conn.Close()
+	if err != nil {
+		sm.logger.Errorf("Close error %v\n", err)
+	}
+
+	if len(measurements) < nrMessages {
+		defer callback(peer, measurements, errors.NonFatalError(500, "Could not make all latency measurements", streamManagerCaller))
+		return
+	}
+
+	callback(peer, measurements, nil)
 }
 
 func (sm streamManager) Logger() *log.Logger {

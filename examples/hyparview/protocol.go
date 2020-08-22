@@ -121,7 +121,7 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	h.addPeerToActiveView(peer)
 	h.logHyparviewState()
 
-	pkg.MeasureLatencyTo(5, peer, h.printMeasurements)
+	pkg.MeasureLatencyTo(5, 5, time.Duration(0), peer, h.printMeasurements)
 
 	return true
 }
@@ -144,11 +144,16 @@ func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, 
 	h.logger.Warnf("Message %s was not sent to %s because: ", reflect.TypeOf(message), peer.ToString(), error.Reason())
 }
 
-func (h *Hyparview) printMeasurements(peer peer.Peer, measurements []time.Duration) {
+func (h *Hyparview) printMeasurements(peer peer.Peer, measurements []time.Duration, err errors.Error) {
+	if err != nil {
+		h.logger.Errorf(err.ToString())
+	}
+
 	h.logger.Infof("Measurements to %s", peer.ToString())
 	for i := 0; i < len(measurements); i++ {
 		h.logger.Infof("%d : %d microsec", i, measurements[i].Microseconds())
 	}
+
 }
 
 // ---------------- Protocol handlers (messages) ----------------

@@ -205,8 +205,8 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func MeasureLatencyTo(nrMessages int, peer peer.Peer, callback func(peer.Peer, []time.Duration)) {
-	go p.streamManager.MeasureLatencyTo(nrMessages, peer, callback)
+func MeasureLatencyTo(nrMessages int, nrRetries int, timeBetweenTries time.Duration, peer peer.Peer, callback func(peer.Peer, []time.Duration, errors.Error)) {
+	go p.streamManager.MeasureLatencyTo(nrMessages, nrRetries, timeBetweenTries, peer, callback)
 }
 
 func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
