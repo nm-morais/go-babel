@@ -3,10 +3,10 @@ package pkg
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/nm-morais/go-babel/configs"
 	internalMsg "github.com/nm-morais/go-babel/internal/message"
@@ -58,9 +58,9 @@ type ProtoManager struct {
 	protocols               *sync.Map
 	protoIds                []protocol.ID
 	streamManager           StreamManager
+	listeners               []stream.Stream
 	channelSubscribers      map[string]map[protocol.ID]bool
 	channelSubscribersMutex *sync.Mutex
-	listener                stream.Stream
 	logger                  *log.Logger
 }
 
@@ -68,22 +68,25 @@ var p *ProtoManager
 var protoMsgSerializer = internalMsg.ProtoHandshakeMessageSerializer{}
 var appMsgSerializer = internalMsg.AppMessageWrapperSerializer{}
 
-func InitProtoManager(configs configs.ProtocolManagerConfig, listener stream.Stream) *ProtoManager {
+func InitProtoManager(configs configs.ProtocolManagerConfig, listenAddr net.Addr) *ProtoManager {
 	p = &ProtoManager{
 		config:                  configs,
-		selfPeer:                peer.NewPeer(listener.ListenAddr()),
+		selfPeer:                peer.NewPeer(listenAddr),
 		notificationHub:         notificationHub.NewNotificationHub(),
 		serializationManager:    serialization.NewSerializationManager(),
 		protocols:               &sync.Map{},
 		protoIds:                []protocol.ID{},
 		streamManager:           NewStreamManager(),
-		listener:                listener,
 		channelSubscribers:      make(map[string]map[protocol.ID]bool),
 		channelSubscribersMutex: &sync.Mutex{},
 		logger:                  logs.NewLogger(ProtoManagerCaller),
 	}
 	p.serializationManager.RegisterSerializer(internalMsg.HeartbeatMessageType, internalMsg.HeartbeatSerializer{})
 	return p
+}
+
+func RegisterListener(listener stream.Stream) {
+	p.listeners = append(p.listeners, listener)
 }
 
 func RegisterProtocol(protocol protocol.Protocol) errors.Error {
@@ -205,10 +208,6 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func MeasureLatencyTo(nrMessages int, nrRetries int, timeBetweenTries time.Duration, peer peer.Peer, callback func(peer.Peer, []time.Duration, errors.Error)) {
-	go p.streamManager.MeasureLatencyTo(nrMessages, nrRetries, timeBetweenTries, peer, callback)
-}
-
 func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
 	callerProto, ok := p.protocols.Load(sourceProtoID)
 	if !ok {
@@ -320,7 +319,8 @@ func outTransportFailure(peer peer.Peer) {
 }
 
 func setupLoggers() {
-	logFolder := p.config.LogFolder + p.listener.ListenAddr().String() + "/"
+	logFolder := p.config.LogFolder + p.selfPeer.ToString() + "/"
+
 	os.RemoveAll(logFolder)
 	err := os.Mkdir(logFolder, 0777)
 	if err != nil {
@@ -364,9 +364,9 @@ func Start() {
 
 	setupLoggers()
 
-	p.logger.Info("Local Addr: ", p.listener.ListenAddr().String())
-
-	go p.streamManager.AcceptConnectionsAndNotify()
+	for _, l := range p.listeners {
+		go p.streamManager.AcceptConnectionsAndNotify(l)
+	}
 
 	p.protocols.Range(func(_, proto interface{}) bool {
 		proto.(protocolValueType).Init()

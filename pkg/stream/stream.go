@@ -14,8 +14,8 @@ type Stream interface {
 	Read(buf []byte) (int, error)
 	Write(msgBytes []byte) (int, error)
 	SetReadTimeout(duration time.Duration)
-	Close() errors.Error
 	Listen() (Listener, errors.Error)
+	Close() error
 }
 
 type Listener interface {

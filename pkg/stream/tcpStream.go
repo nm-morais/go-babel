@@ -66,11 +66,8 @@ func (t *TCPStream) Read(msgBytes []byte) (int, error) {
 	return t.conn.Read(msgBytes)
 }
 
-func (t *TCPStream) Close() errors.Error {
-	if err := t.conn.Close(); err != nil {
-		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
-	}
-	return nil
+func (t *TCPStream) Close() error {
+	return t.conn.Close()
 }
 
 type TCPListener struct {

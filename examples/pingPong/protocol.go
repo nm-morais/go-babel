@@ -1,6 +1,8 @@
-package pingPong
+package main
 
 import (
+	"time"
+
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -10,7 +12,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	log "github.com/sirupsen/logrus"
-	"time"
 )
 
 const protoID = 1000

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nm-morais/go-babel/configs"
-	"github.com/nm-morais/go-babel/examples/hyparview"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
@@ -28,7 +27,11 @@ func main() {
 	if randPort {
 		portVar = rand.Intn(maxPort-minPort) + minPort
 	}
-	listenAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:%d", portVar))
+	listenAddrTcp, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:%d", portVar))
+	if err != nil {
+		panic(err)
+	}
+	listenAddrUdp, err := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", portVar))
 	if err != nil {
 		panic(err)
 	}
@@ -39,12 +42,14 @@ func main() {
 		DialTimeout:           1 * time.Second,
 		ConnectionReadTimeout: 5 * time.Second,
 	}
-	pkg.InitProtoManager(config, stream.NewTCPListener(listenAddr))
+	pkg.InitProtoManager(config, listenAddrTcp)
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1200")
 	if err != nil {
 		panic(err)
 	}
+	pkg.RegisterListener(stream.NewTCPListener(listenAddrTcp))
+	pkg.RegisterListener(stream.NewUDPListener(listenAddrUdp))
 
-	pkg.RegisterProtocol(hyparview.NewHyparviewProtocol(peer.NewPeer(contactNodeAddr)))
+	pkg.RegisterProtocol(NewHyparviewProtocol(peer.NewPeer(contactNodeAddr)))
 	pkg.Start()
 }

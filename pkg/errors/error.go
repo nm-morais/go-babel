@@ -2,6 +2,7 @@ package errors
 
 import (
 	"fmt"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -56,7 +57,7 @@ func (err *genericErr) Log(logger *logrus.Logger) {
 }
 
 func (err *genericErr) ToString() string {
-	return fmt.Sprintf("Error type: %d, Reason: %s", err.Code(), err.Reason())
+	return fmt.Sprintf("Error type: %d, Reason: %s, Caller: %s", err.Code(), err.Reason(), err.Caller())
 }
 
 func (err *genericErr) Fatal() bool {

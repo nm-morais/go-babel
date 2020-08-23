@@ -6,8 +6,7 @@ import (
 	"net"
 	"time"
 
-	. "github.com/nm-morais/go-babel/configs"
-	"github.com/nm-morais/go-babel/examples/pingPong"
+	"github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
@@ -23,18 +22,19 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	configs := ProtocolManagerConfig{
+	configs := configs.ProtocolManagerConfig{
 		HeartbeatTickDuration: 1 * time.Second,
 		ConnectionReadTimeout: 3 * time.Second,
 	}
-	listener := stream.NewTCPListener(listenAddr)
-	pkg.InitProtoManager(configs, listener)
+	pkg.InitProtoManager(configs, listenAddr)
 
 	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1234")
 	if err != nil {
 		panic(err)
 	}
 
-	pkg.RegisterProtocol(pingPong.NewPingPongProtocol(peer.NewPeer(contactNodeAddr)))
+	listener := stream.NewTCPListener(listenAddr)
+	pkg.RegisterListener(listener)
+	pkg.RegisterProtocol(NewPingPongProtocol(peer.NewPeer(contactNodeAddr)))
 	pkg.Start()
 }

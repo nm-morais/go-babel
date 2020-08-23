@@ -1,4 +1,4 @@
-package pingPong
+package main
 
 import (
 	"github.com/nm-morais/go-babel/pkg/message"

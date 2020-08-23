@@ -1,4 +1,4 @@
-package hyparview
+package main
 
 import (
 	"fmt"
@@ -81,7 +81,7 @@ func (h *Hyparview) Start() {
 	}
 	toSend := JoinMessage{}
 	h.logger.Info("Sending join message...")
-	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
+	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewUDPDialer())
 }
 
 func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
@@ -120,8 +120,6 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 
 	h.addPeerToActiveView(peer)
 	h.logHyparviewState()
-
-	pkg.MeasureLatencyTo(5, 5, time.Duration(0), peer, h.printMeasurements)
 
 	return true
 }
@@ -345,7 +343,7 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {
 			toSend := JoinMessage{}
 			h.pendingDials[h.contactNode.ToString()] = true
-			pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
+			pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewUDPDialer())
 			return
 		}
 		if !h.isActiveViewFull() && len(h.pendingDials)+len(h.activeView) <= activeViewSize && len(h.passiveView) > 0 {
@@ -555,5 +553,5 @@ func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
-	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewTCPDialer())
+	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewUDPDialer())
 }

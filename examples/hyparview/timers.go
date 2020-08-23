@@ -1,4 +1,4 @@
-package hyparview
+package main
 
 import (
 	"time"
