@@ -6,14 +6,14 @@ import (
 
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	log "github.com/sirupsen/logrus"
 )
 
 const UDPTransportCaller = "UDPTransportCaller"
 
 type UDPStream struct {
 	listenAddr net.Addr
-	conn       *net.UDPConn
+	packetConn net.Conn
+	targetAddr net.Addr
 }
 
 func NewUDPListener(listenAddr net.Addr) Stream {
@@ -33,7 +33,12 @@ func (t *UDPStream) SetReadTimeout(duration time.Duration) {
 }
 
 func (t *UDPStream) Listen() (Listener, errors.Error) {
-	panic("not supported")
+	conn, err := net.ListenPacket("udp", t.listenAddr.String())
+	if err != nil {
+		panic(err)
+	}
+	t.packetConn = conn.(net.Conn)
+	return nil, nil
 }
 
 func (t *UDPStream) Dial(peer peer.Peer) errors.Error {
@@ -41,39 +46,23 @@ func (t *UDPStream) Dial(peer peer.Peer) errors.Error {
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
 	}
-	conn, err := net.DialUDP("udp", nil, addr)
+	t.targetAddr = addr
+	conn, err := net.Dial("udp", addr.String())
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
 	}
-	t.conn = conn
+	t.packetConn = conn
 	return nil
 }
 
 func (t *UDPStream) Write(msgBytes []byte) (int, error) {
-	return t.conn.Write(msgBytes)
+	return t.packetConn.Write(msgBytes)
 }
 
 func (t *UDPStream) Read(msgBytes []byte) (int, error) {
-
-	conn, err := net.ListenPacket("udp", t.listenAddr.String())
-	defer func() {
-		if err := conn.Close(); err != nil {
-			log.Error(err)
-		}
-	}()
-	if err != nil {
-		panic(err)
-	}
-
-	n, _, err := conn.ReadFrom(msgBytes)
-
-	if err != nil {
-		return -1, err
-	}
-
-	return n, nil
+	return t.packetConn.Read(msgBytes)
 }
 
 func (t *UDPStream) Close() error {
-	return t.conn.Close()
+	return t.packetConn.Close()
 }

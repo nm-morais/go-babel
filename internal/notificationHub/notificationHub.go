@@ -9,20 +9,20 @@ import (
 )
 
 type NotificationHub interface {
-	AddListener(id notification.ID, listener *internalProto.WrapperProtocol)
+	AddListener(id notification.ID, listener internalProto.WrapperProtocol)
 	RemoveListener(listenerID notification.ID, protoID protocol.ID)
 	AddNotification(notification notification.Notification)
 }
 
 type notificationHub struct {
 	listenersMutex *sync.RWMutex
-	listeners      map[notification.ID][]*internalProto.WrapperProtocol
+	listeners      map[notification.ID][]internalProto.WrapperProtocol
 }
 
 func NewNotificationHub() NotificationHub {
 	return &notificationHub{
 		listenersMutex: &sync.RWMutex{},
-		listeners:      map[notification.ID][]*internalProto.WrapperProtocol{},
+		listeners:      map[notification.ID][]internalProto.WrapperProtocol{},
 	}
 }
 
@@ -44,11 +44,11 @@ func (hub *notificationHub) RemoveListener(id notification.ID, protoID protocol.
 	hub.listenersMutex.Unlock()
 }
 
-func (hub *notificationHub) AddListener(id notification.ID, wrapperProtocol *internalProto.WrapperProtocol) {
+func (hub *notificationHub) AddListener(id notification.ID, wrapperProtocol internalProto.WrapperProtocol) {
 	hub.listenersMutex.Lock()
 	currListeners, ok := hub.listeners[id]
 	if !ok {
-		hub.listeners[id] = []*internalProto.WrapperProtocol{wrapperProtocol}
+		hub.listeners[id] = []internalProto.WrapperProtocol{wrapperProtocol}
 		return
 	}
 	currListeners = append(currListeners, wrapperProtocol)

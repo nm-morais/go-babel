@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"fmt"
+
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/message"
@@ -69,8 +70,8 @@ type inConnReqEventWithBoolReply struct {
 	respChan chan bool
 }
 
-func NewWrapperProtocol(protocol protocol.Protocol) *WrapperProtocol {
-	return &WrapperProtocol{
+func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
+	return WrapperProtocol{
 		id:              protocol.ID(),
 		wrappedProtocol: protocol,
 
@@ -99,26 +100,26 @@ func NewWrapperProtocol(protocol protocol.Protocol) *WrapperProtocol {
 
 //  channel Deliverers
 
-func (pw *WrapperProtocol) DeliverRequestReply(reply request.Reply) {
+func (pw WrapperProtocol) DeliverRequestReply(reply request.Reply) {
 	pw.replyChan <- reply
 }
 
-func (pw *WrapperProtocol) DeliverNotification(notification notification.Notification) {
+func (pw WrapperProtocol) DeliverNotification(notification notification.Notification) {
 	pw.notificationChan <- notification
 }
 
-func (pw *WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
+func (pw WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
 	pw.messageChan <- messageWithPeer{
 		peer:    sender,
 		message: msg,
 	}
 }
 
-func (pw *WrapperProtocol) DeliverTimer(timer timer.Timer) {
+func (pw WrapperProtocol) DeliverTimer(timer timer.Timer) {
 	pw.timerChan <- timer
 }
 
-func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Reply {
+func (pw WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Reply {
 	aux := reqWithReplyCHan{
 		req:      req,
 		respChan: make(chan request.Reply),
@@ -129,7 +130,7 @@ func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Re
 
 // channel handler
 
-func (pw *WrapperProtocol) handleChannels() {
+func (pw WrapperProtocol) handleChannels() {
 	for {
 		//log.Infof("New event")
 		select {
@@ -165,7 +166,7 @@ func (pw *WrapperProtocol) handleChannels() {
 
 // internal handlers
 
-func (pw *WrapperProtocol) handleNotification(notification notification.Notification) {
+func (pw WrapperProtocol) handleNotification(notification notification.Notification) {
 	handler, ok := pw.notificationHandlers[notification.ID()]
 	if !ok {
 		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
@@ -173,7 +174,7 @@ func (pw *WrapperProtocol) handleNotification(notification notification.Notifica
 	handler(notification)
 }
 
-func (pw *WrapperProtocol) handleTimer(timer timer.Timer) {
+func (pw WrapperProtocol) handleTimer(timer timer.Timer) {
 	handler, ok := pw.timerHandlers[timer.ID()]
 	if !ok {
 		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
@@ -181,7 +182,7 @@ func (pw *WrapperProtocol) handleTimer(timer timer.Timer) {
 	handler(timer)
 }
 
-func (pw *WrapperProtocol) handleReply(reply request.Reply) {
+func (pw WrapperProtocol) handleReply(reply request.Reply) {
 	handler, ok := pw.requestHandlers[reply.ID()]
 	if !ok {
 		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
@@ -189,7 +190,7 @@ func (pw *WrapperProtocol) handleReply(reply request.Reply) {
 	handler(reply)
 }
 
-func (pw *WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
+func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
 		panic(errors.FatalError(404, "receivedMsg handler not found", string(pw.wrappedProtocol.ID())))
@@ -197,7 +198,7 @@ func (pw *WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Mes
 	handler(peer, receivedMsg)
 }
 
-func (pw *WrapperProtocol) handleRequest(request request.Request) request.Reply {
+func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
 	handler, ok := pw.requestHandlers[request.ID()]
 	if !ok {
 		panic(errors.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
@@ -213,7 +214,7 @@ func (pw *WrapperProtocol) handleRequest(request request.Request) request.Reply 
 // replies
 // timer
 
-func (pw *WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
+func (pw WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
 	_, exists := pw.messageHandlers[messageID]
 	if exists {
 		return errors.FatalError(409, fmt.Sprintf("Message handler with MsgID: %d already exists", messageID), string(pw.wrappedProtocol.ID()))
@@ -222,7 +223,7 @@ func (pw *WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler 
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterNotificationHandler(notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
+func (pw WrapperProtocol) RegisterNotificationHandler(notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
 	_, exists := pw.notificationHandlers[notificationID]
 	if exists {
 		return errors.FatalError(409, fmt.Sprintf("Notification handler with notificationID: %d already exists", notificationID), string(pw.wrappedProtocol.ID()))
@@ -231,7 +232,7 @@ func (pw *WrapperProtocol) RegisterNotificationHandler(notificationID notificati
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
+func (pw WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
 	_, exists := pw.replyHandlers[replyID]
 	if exists {
 		return errors.FatalError(409, fmt.Sprintf("Request handler with replyID: %d already exists", replyID), string(pw.wrappedProtocol.ID()))
@@ -240,7 +241,7 @@ func (pw *WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handl
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
+func (pw WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
 	_, exists := pw.requestHandlers[requestID]
 	if exists {
 		return errors.FatalError(409, fmt.Sprintf("Request handler with MsgID: %d already exists", requestID), string(pw.wrappedProtocol.ID()))
@@ -249,7 +250,7 @@ func (pw *WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler 
 	return nil
 }
 
-func (pw *WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
+func (pw WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
 	_, exists := pw.timerHandlers[timerID]
 	if exists {
 		return errors.FatalError(409, fmt.Sprintf("Request handler with timerID: %d already exists", timerID), string(pw.wrappedProtocol.ID()))
@@ -260,14 +261,14 @@ func (pw *WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handle
 
 //
 
-func (pw *WrapperProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
+func (pw WrapperProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
 	pw.messageDeliveredChan <- messageWithPeer{
 		peer:    peer,
 		message: message,
 	}
 }
 
-func (pw *WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
+func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
 	pw.messageDeliveryErrChan <- messageWithPeerAndErr{
 		peer:    peer,
 		message: message,
@@ -275,20 +276,20 @@ func (pw *WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer
 	}
 }
 
-func (pw *WrapperProtocol) ID() protocol.ID {
+func (pw WrapperProtocol) ID() protocol.ID {
 	return pw.wrappedProtocol.ID()
 }
 
-func (pw *WrapperProtocol) Start() {
-	go pw.handleChannels()
+func (pw WrapperProtocol) Start() {
 	pw.wrappedProtocol.Start()
+	go pw.handleChannels()
 }
 
-func (pw *WrapperProtocol) Init() {
+func (pw WrapperProtocol) Init() {
 	pw.wrappedProtocol.Init()
 }
 
-func (pw *WrapperProtocol) InConnRequested(peer peer.Peer) bool {
+func (pw WrapperProtocol) InConnRequested(peer peer.Peer) bool {
 	event := inConnReqEventWithBoolReply{
 		peer:     peer,
 		respChan: make(chan bool),
@@ -298,7 +299,7 @@ func (pw *WrapperProtocol) InConnRequested(peer peer.Peer) bool {
 	return reply
 }
 
-func (pw *WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) bool {
+func (pw WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) bool {
 	event := dialSuccessWithBoolReplyChan{
 		dialingProto: dialerProto,
 		peer:         peer,
@@ -309,18 +310,18 @@ func (pw *WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) 
 	return reply
 }
 
-func (pw *WrapperProtocol) DialFailed(peer peer.Peer) {
+func (pw WrapperProtocol) DialFailed(peer peer.Peer) {
 	pw.dialFailed <- peer
 }
 
-func (pw *WrapperProtocol) OutConnDown(peer peer.Peer) {
+func (pw WrapperProtocol) OutConnDown(peer peer.Peer) {
 	pw.outConnDown <- peer
 }
 
-func (pw *WrapperProtocol) Logger() *log.Logger {
+func (pw WrapperProtocol) Logger() *log.Logger {
 	return pw.wrappedProtocol.Logger()
 }
 
-func (pw *WrapperProtocol) Name() string {
+func (pw WrapperProtocol) Name() string {
 	return pw.wrappedProtocol.Name()
 }

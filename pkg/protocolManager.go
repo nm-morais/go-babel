@@ -45,7 +45,7 @@ type IProtocolManager interface {
 }
 */
 
-type protocolValueType = *internalProto.WrapperProtocol
+type protocolValueType = internalProto.WrapperProtocol
 
 var hbProtoInternalID = protocol.ID(1)
 var reservedProtos = []protocol.ID{hbProtoInternalID}
@@ -64,12 +64,12 @@ type ProtoManager struct {
 	logger                  *log.Logger
 }
 
-var p *ProtoManager
+var p ProtoManager
 var protoMsgSerializer = internalMsg.ProtoHandshakeMessageSerializer{}
 var appMsgSerializer = internalMsg.AppMessageWrapperSerializer{}
 
-func InitProtoManager(configs configs.ProtocolManagerConfig, listenAddr net.Addr) *ProtoManager {
-	p = &ProtoManager{
+func InitProtoManager(configs configs.ProtocolManagerConfig, listenAddr net.Addr) ProtoManager {
+	p = ProtoManager{
 		config:                  configs,
 		selfPeer:                peer.NewPeer(listenAddr),
 		notificationHub:         notificationHub.NewNotificationHub(),

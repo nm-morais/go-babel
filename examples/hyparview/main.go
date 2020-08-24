@@ -20,6 +20,7 @@ func main() {
 
 	var portVar int
 	var randPort bool
+
 	flag.IntVar(&portVar, "p", 1200, "port")
 	flag.BoolVar(&randPort, "r", false, "port")
 	flag.Parse()
@@ -47,9 +48,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	pkg.RegisterListener(stream.NewTCPListener(listenAddrTcp))
 	pkg.RegisterListener(stream.NewUDPListener(listenAddrUdp))
-
 	pkg.RegisterProtocol(NewHyparviewProtocol(peer.NewPeer(contactNodeAddr)))
+
 	pkg.Start()
 }

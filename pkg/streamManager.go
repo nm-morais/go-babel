@@ -85,6 +85,7 @@ func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial pee
 		if err := s.Dial(toDial); err != nil {
 			return err
 		}
+		defer s.Close()
 		mw := messageIO.NewMessageWriter(s)
 		err := sm.sendHandshakeMessage(mw, destProtos, TemporaryTunnel)
 		if err != nil {
@@ -96,15 +97,16 @@ func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial pee
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
 		_, wErr := mw.Write(wrappedBytes)
 		if wErr != nil {
-			errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
-		s.Close()
 		return nil
 
 	case *stream.UDPStream:
 		if err := s.Dial(toDial); err != nil {
 			return err
 		}
+		defer s.Close()
+
 		msgSizeBytes := make([]byte, 4)
 		msgBytes := toSend.Serializer().Serialize(toSend)
 		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
@@ -115,9 +117,8 @@ func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial pee
 		totalMsgBytes := append(msgSizeBytes, wrappedBytes...)
 		_, wErr := s.Write(append(totalMsgBytes, peerBytes...))
 		if wErr != nil {
-			errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
-		s.Close()
 		return nil
 	default:
 		log.Panicf("Unknown stream type %s", reflect.TypeOf(s))
@@ -181,6 +182,10 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 			sm.logStreamManagerState()
 		}
 	case *stream.UDPStream:
+		_, err := s.Listen()
+		if err != nil {
+			panic(err.Reason())
+		}
 		for {
 			msgBuf := make([]byte, 2048)
 			n, rErr := s.Read(msgBuf)
@@ -188,9 +193,11 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 				log.Warnf("An error ocurred reading message using UDP:%s ", rErr.Error())
 				continue
 			}
+
 			msgSize := int(binary.BigEndian.Uint32(msgBuf[:4]))
 			deserialized := deserializer.Deserialize(msgBuf[4 : 4+msgSize])
 			_, sender := serialization.DeserializePeer(msgBuf[4+msgSize : n])
+
 			protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
 			for _, toNotifyID := range protoMsg.DestProtos {
 				if toNotify, ok := p.protocols.Load(toNotifyID); ok {
