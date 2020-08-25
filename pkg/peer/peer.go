@@ -1,33 +1,82 @@
 package peer
 
 import (
+	"encoding/binary"
+	"fmt"
 	"net"
 )
 
 type Peer interface {
-	Addr() net.Addr
+	IP() net.IP
+	ProtosPort() uint16
+	AnalyticsPort() uint16
 	Equals(other Peer) bool
+	SerializeToBinary() []byte
 	ToString() string
 }
 
 type peer struct {
-	addr net.Addr
+	ip            net.IP
+	protosPort    uint16
+	analyticsPort uint16
 }
 
-func NewPeer(addr net.Addr) Peer {
+func NewPeer(ip net.IP, protosPort uint16, analyticsPort uint16) Peer {
 	return peer{
-		addr: addr,
+		ip:            ip,
+		protosPort:    protosPort,
+		analyticsPort: analyticsPort,
 	}
 }
+func (p peer) IP() net.IP {
+	return p.ip
+}
 
-func (p peer) Addr() net.Addr {
-	return p.addr
+func (p peer) ProtosPort() uint16 {
+	return p.protosPort
+}
+
+func (p peer) AnalyticsPort() uint16 {
+	return p.analyticsPort
 }
 
 func (p peer) ToString() string {
-	return p.addr.String()
+	return fmt.Sprintf("%s:%d/%d", p.ip, p.protosPort, p.analyticsPort)
 }
 
 func (p peer) Equals(otherPeer Peer) bool {
-	return p.ToString() == otherPeer.ToString()
+	return p.ip.Equal(otherPeer.IP())
+}
+
+func (p peer) SerializeToBinary() []byte {
+	peerBytes := make([]byte, 0, 8)
+	peerBytes = append(peerBytes, p.IP()...)
+	binary.BigEndian.PutUint16(peerBytes[4:], p.ProtosPort())
+	binary.BigEndian.PutUint16(peerBytes[6:], p.AnalyticsPort())
+	return peerBytes
+}
+
+func DeserializePeer(buf []byte) (int, Peer) {
+	return 8, NewPeer(buf[0:4], binary.BigEndian.Uint16(buf[4:6]), binary.BigEndian.Uint16(buf[6:8]))
+}
+
+func SerializePeerArray(peers []Peer) []byte {
+	totalBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(totalBytes, uint32(len(peers)))
+	for _, p := range peers {
+		totalBytes = append(totalBytes, p.SerializeToBinary()...)
+	}
+	return totalBytes
+}
+
+func DeserializePeerArray(buf []byte) (int, []Peer) {
+	nrPeers := int(binary.BigEndian.Uint32(buf[:4]))
+	peers := make([]Peer, nrPeers)
+	bufPos := 4
+	for i := 0; i < nrPeers; i++ {
+		read, peer := DeserializePeer(buf[:bufPos])
+		peers[i] = peer
+		bufPos += read
+	}
+	return bufPos, peers
 }

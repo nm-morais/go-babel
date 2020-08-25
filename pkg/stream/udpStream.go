@@ -5,18 +5,17 @@ import (
 	"time"
 
 	"github.com/nm-morais/go-babel/pkg/errors"
-	"github.com/nm-morais/go-babel/pkg/peer"
 )
 
 const UDPTransportCaller = "UDPTransportCaller"
 
 type UDPStream struct {
-	listenAddr net.Addr
+	listenAddr *net.UDPAddr
+	targetAddr *net.UDPAddr
 	packetConn net.Conn
-	targetAddr net.Addr
 }
 
-func NewUDPListener(listenAddr net.Addr) Stream {
+func NewUDPListener(listenAddr *net.UDPAddr) Stream {
 	return &UDPStream{listenAddr: listenAddr}
 }
 
@@ -33,21 +32,16 @@ func (t *UDPStream) SetReadTimeout(duration time.Duration) {
 }
 
 func (t *UDPStream) Listen() (Listener, errors.Error) {
-	conn, err := net.ListenPacket("udp", t.listenAddr.String())
-	if err != nil {
-		panic(err)
-	}
-	t.packetConn = conn.(net.Conn)
-	return nil, nil
+	return UDPListener{addr: t.listenAddr}, nil
 }
 
-func (t *UDPStream) Dial(peer peer.Peer) errors.Error {
-	addr, err := net.ResolveUDPAddr("udp", peer.Addr().String())
+func (t *UDPStream) Dial(toDial net.Addr) errors.Error {
+	resolved, err := net.ResolveUDPAddr("udp", toDial.String())
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
 	}
-	t.targetAddr = addr
-	conn, err := net.Dial("udp", addr.String())
+	t.targetAddr = resolved
+	conn, err := net.Dial("udp", resolved.String())
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
 	}
@@ -65,4 +59,20 @@ func (t *UDPStream) Read(msgBytes []byte) (int, error) {
 
 func (t *UDPStream) Close() error {
 	return t.packetConn.Close()
+}
+
+type UDPListener struct {
+	addr *net.UDPAddr
+}
+
+func (l UDPListener) Listener() Listener {
+	return l
+}
+
+func (l UDPListener) Accept() (Stream, errors.Error) {
+	conn, err := net.ListenUDP("udp", l.addr)
+	if err != nil {
+		panic(err)
+	}
+	return &UDPStream{listenAddr: l.addr, packetConn: conn}, nil
 }

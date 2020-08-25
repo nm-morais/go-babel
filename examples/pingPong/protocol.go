@@ -58,7 +58,7 @@ func (m *PingPongProtocol) Init() {
 }
 
 func (m *PingPongProtocol) Start() {
-	if pkg.SelfPeer().Addr().String() != m.contact.Addr().String() {
+	if !pkg.SelfPeer().Equals(m.contact) {
 		m.logger.Infof("Dialing contact node")
 		pkg.Dial(m.contact, protoID, stream.NewTCPDialer())
 	} else {
@@ -68,7 +68,7 @@ func (m *PingPongProtocol) Start() {
 
 func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
 	m.logger.Infof("Dial failed")
-	if peer.Addr().String() == m.contact.Addr().String() {
+	if peer.Equals(m.contact) {
 		panic("contacting bootstrap node failed")
 	}
 }
@@ -95,7 +95,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 	}
 
 	for remotePeer := range m.activePeers {
-		m.logger.Infof("Sending pingMessage to %s", remotePeer.Addr().String())
+		m.logger.Infof("Sending pingMessage to %s", remotePeer.ToString())
 		//pkg.Write(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		for i := 0; i < 1; i++ {
 			pkg.SendMessage(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
@@ -106,7 +106,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 }
 
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	m.logger.Infof("Connection established to peer %+v", peer.Addr().String())
+	m.logger.Infof("Connection established to peer %+v", peer.ToString())
 	if sourceProto == protoID {
 		m.activePeers[peer] = true
 		pkg.RegisterTimer(protoID, PingTimer{timer: time.NewTimer(0 * time.Second)})

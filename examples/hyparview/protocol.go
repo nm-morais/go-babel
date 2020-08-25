@@ -142,18 +142,6 @@ func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, 
 	h.logger.Warnf("Message %s was not sent to %s because: ", reflect.TypeOf(message), peer.ToString(), error.Reason())
 }
 
-func (h *Hyparview) printMeasurements(peer peer.Peer, measurements []time.Duration, err errors.Error) {
-	if err != nil {
-		h.logger.Errorf(err.ToString())
-	}
-
-	h.logger.Infof("Measurements to %s", peer.ToString())
-	for i := 0; i < len(measurements); i++ {
-		h.logger.Infof("%d : %d microsec", i, measurements[i].Microseconds())
-	}
-
-}
-
 // ---------------- Protocol handlers (messages) ----------------
 
 func (h *Hyparview) HandleJoinMessage(sender peer.Peer, message message.Message) {
@@ -261,8 +249,6 @@ func (h *Hyparview) HandleShuffleMessage(sender peer.Peer, message message.Messa
 				//h.logger.Info("Forwarding shuffle message to :", rndNodes[0].ToString())
 				h.sendMessage(toSend, rndNodes[0])
 				return
-			} else {
-				//h.logger.Error("Could not forward shuffle message")
 			}
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/nm-morais/go-babel/pkg/errors"
-	"github.com/nm-morais/go-babel/pkg/peer"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -16,7 +15,7 @@ type TCPStream struct {
 	conn       *net.TCPConn
 }
 
-func NewTCPListener(listenAddr net.Addr) Stream {
+func NewTCPListener(listenAddr *net.TCPAddr) Stream {
 	return &TCPStream{listenAddr: listenAddr}
 }
 
@@ -43,12 +42,12 @@ func (t *TCPStream) Listen() (Listener, errors.Error) {
 	return TCPListener{listener: l}, nil
 }
 
-func (t *TCPStream) Dial(peer peer.Peer) errors.Error {
-	addr, err := net.ResolveTCPAddr("tcp4", peer.Addr().String())
+func (t *TCPStream) Dial(addr net.Addr) errors.Error {
+	tcpAddr, err := net.ResolveTCPAddr("tcp4", addr.String())
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 	}
-	conn, err := net.DialTCP("tcp4", nil, addr)
+	conn, err := net.DialTCP("tcp4", nil, tcpAddr)
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
 	}

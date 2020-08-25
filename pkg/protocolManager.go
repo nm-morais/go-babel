@@ -3,7 +3,6 @@ package pkg
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"reflect"
 	"sync"
@@ -51,7 +50,6 @@ var hbProtoInternalID = protocol.ID(1)
 var reservedProtos = []protocol.ID{hbProtoInternalID}
 
 type ProtoManager struct {
-	selfPeer                peer.Peer
 	config                  configs.ProtocolManagerConfig
 	notificationHub         notificationHub.NotificationHub
 	serializationManager    *serialization.Manager
@@ -68,10 +66,9 @@ var p ProtoManager
 var protoMsgSerializer = internalMsg.ProtoHandshakeMessageSerializer{}
 var appMsgSerializer = internalMsg.AppMessageWrapperSerializer{}
 
-func InitProtoManager(configs configs.ProtocolManagerConfig, listenAddr net.Addr) ProtoManager {
+func InitProtoManager(configs configs.ProtocolManagerConfig) ProtoManager {
 	p = ProtoManager{
 		config:                  configs,
-		selfPeer:                peer.NewPeer(listenAddr),
 		notificationHub:         notificationHub.NewNotificationHub(),
 		serializationManager:    serialization.NewSerializationManager(),
 		protocols:               &sync.Map{},
@@ -225,7 +222,7 @@ func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceP
 }
 
 func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t stream.Stream) {
-	p.logger.Warnf("Dialing new node %s", toDial.Addr())
+	p.logger.Warnf("Dialing new node %s", toDial.ToString())
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
 
@@ -244,7 +241,7 @@ func Disconnect(source protocol.ID, peer peer.Peer) {
 }
 
 func SelfPeer() peer.Peer {
-	return p.selfPeer
+	return p.config.Peer
 }
 
 func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
@@ -319,7 +316,7 @@ func outTransportFailure(peer peer.Peer) {
 }
 
 func setupLoggers() {
-	logFolder := p.config.LogFolder + p.selfPeer.ToString() + "/"
+	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
 
 	os.RemoveAll(logFolder)
 	err := os.Mkdir(logFolder, 0777)

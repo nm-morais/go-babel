@@ -6,7 +6,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"github.com/nm-morais/go-babel/pkg/serialization"
 )
 
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
@@ -52,7 +51,7 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []
 		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
 		bufPos += 2
 	}
-	toSend := append(buf, serialization.SerializePeer(protoMsg.Peer)...)
+	toSend := append(buf, protoMsg.Peer.SerializeToBinary()...)
 	return toSend
 }
 
@@ -68,7 +67,7 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])
 		bufPos += 2
 	}
-	_, peer := serialization.DeserializePeer(buf[bufPos:])
+	_, peer := peer.DeserializePeer(buf[bufPos:])
 	newMsg.Peer = peer
 	return newMsg
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"math/rand"
 	"net"
 	"time"
@@ -15,43 +14,44 @@ import (
 
 func main() {
 	rand.Seed(time.Now().Unix() + rand.Int63())
-	minPort := 8000
-	maxPort := 9000
+	minProtosPort := 7000
+	maxProtosPort := 8000
+	minAnalyticsPort := 8000
+	maxAnalyticsPort := 9000
 
-	var portVar int
-	var randPort bool
+	var protosPortVar int
+	var analyticsPortVar int
+	var randProtosPort bool
+	var randAnalyticsPort bool
 
-	flag.IntVar(&portVar, "p", 1200, "port")
-	flag.BoolVar(&randPort, "r", false, "port")
+	flag.IntVar(&protosPortVar, "analytics", 1201, "analytics")
+	flag.IntVar(&analyticsPortVar, "protos", 1200, "protos")
+	flag.BoolVar(&randProtosPort, "rprotos", false, "port")
+	flag.BoolVar(&randAnalyticsPort, "ranalytics", false, "port")
 	flag.Parse()
 
-	if randPort {
-		portVar = rand.Intn(maxPort-minPort) + minPort
+	if randProtosPort {
+		protosPortVar = rand.Intn(maxProtosPort-minProtosPort) + minProtosPort
 	}
-	listenAddrTcp, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:%d", portVar))
-	if err != nil {
-		panic(err)
+
+	if randAnalyticsPort {
+		analyticsPortVar = rand.Intn(maxAnalyticsPort-minAnalyticsPort) + minAnalyticsPort
 	}
-	listenAddrUdp, err := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", portVar))
-	if err != nil {
-		panic(err)
-	}
+
 	config := configs.ProtocolManagerConfig{
 		LogFolder:             "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
 		HandshakeTimeout:      1 * time.Second,
 		HeartbeatTickDuration: 1 * time.Second,
 		DialTimeout:           1 * time.Second,
 		ConnectionReadTimeout: 5 * time.Second,
-	}
-	pkg.InitProtoManager(config, listenAddrTcp)
-	contactNodeAddr, err := net.ResolveTCPAddr("tcp", "localhost:1200")
-	if err != nil {
-		panic(err)
+		Peer:                  peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(protosPortVar), uint16(analyticsPortVar)),
 	}
 
-	pkg.RegisterListener(stream.NewTCPListener(listenAddrTcp))
-	pkg.RegisterListener(stream.NewUDPListener(listenAddrUdp))
-	pkg.RegisterProtocol(NewHyparviewProtocol(peer.NewPeer(contactNodeAddr)))
+	contactNode := peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(1200), uint16(1200))
 
+	pkg.InitProtoManager(config)
+	pkg.RegisterListener(stream.NewTCPListener(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())}))
+	pkg.RegisterListener(stream.NewUDPListener(&net.UDPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())}))
+	pkg.RegisterProtocol(NewHyparviewProtocol(contactNode))
 	pkg.Start()
 }

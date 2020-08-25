@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"time"
+
+	"github.com/nm-morais/go-babel/pkg/peer"
 )
 
 type ProtocolManagerConfig struct {
@@ -12,6 +14,7 @@ type ProtocolManagerConfig struct {
 	HeartbeatTickDuration time.Duration
 	ConnectionReadTimeout time.Duration
 	DialTimeout           time.Duration
+	Peer                  peer.Peer
 }
 
 func ReadConfigFromFile(filePath string) ProtocolManagerConfig {

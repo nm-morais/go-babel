@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"net"
 
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
@@ -55,18 +54,15 @@ func (forwardJoinMessageSerializer) Serialize(msg message.Message) []byte {
 	converted := msg.(ForwardJoinMessage)
 	ttlBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(ttlBytes, converted.TTL)
-	return append(ttlBytes, []byte(converted.OriginalSender.Addr().String())...)
+	return append(ttlBytes, converted.OriginalSender.SerializeToBinary()...)
 }
 
 func (forwardJoinMessageSerializer) Deserialize(msgBytes []byte) message.Message {
 	ttl := binary.BigEndian.Uint32(msgBytes[0:4])
-	addr, err := net.ResolveTCPAddr("tcp", string(msgBytes[4:]))
-	if err != nil {
-		panic("invalid addr")
-	}
+	_, p := peer.DeserializePeer(msgBytes[4:])
 	return ForwardJoinMessage{
 		TTL:            ttl,
-		OriginalSender: peer.NewPeer(addr),
+		OriginalSender: p,
 	}
 }
 
@@ -159,34 +155,14 @@ func (ShuffleMessageSerializer) Serialize(msg message.Message) []byte {
 	shuffleMsg := msg.(ShuffleMessage)
 	binary.BigEndian.PutUint32(msgBytes[0:4], shuffleMsg.ID)
 	binary.BigEndian.PutUint32(msgBytes[4:8], shuffleMsg.TTL)
-	binary.BigEndian.PutUint32(msgBytes[8:12], uint32(len(shuffleMsg.Peers)))
-	for _, addr := range shuffleMsg.Peers {
-		hostSizeBytes := make([]byte, 4)
-		hostBytes := []byte(addr.Addr().String())
-		binary.BigEndian.PutUint32(hostSizeBytes[0:4], uint32(len(hostBytes)))
-		msgBytes = append(msgBytes, hostSizeBytes...)
-		msgBytes = append(msgBytes, hostBytes...)
-	}
+	peer.SerializePeerArray(shuffleMsg.Peers)
 	return msgBytes
 }
 
 func (ShuffleMessageSerializer) Deserialize(msgBytes []byte) message.Message {
 	id := binary.BigEndian.Uint32(msgBytes[0:4])
 	ttl := binary.BigEndian.Uint32(msgBytes[4:8])
-	nrHosts := int(binary.BigEndian.Uint32(msgBytes[8:12]))
-	hosts := make([]peer.Peer, nrHosts)
-	bufPos := 12
-	for i := 0; i < nrHosts; i++ {
-		addrSize := int(binary.BigEndian.Uint32(msgBytes[bufPos : bufPos+4]))
-		bufPos += 4
-		addr := string(msgBytes[bufPos : bufPos+addrSize])
-		bufPos += addrSize
-		resolved, err := net.ResolveTCPAddr("tcp", addr)
-		if err != nil {
-			panic(err)
-		}
-		hosts[i] = peer.NewPeer(resolved)
-	}
+	_, hosts := peer.DeserializePeerArray(msgBytes[8:])
 	return ShuffleMessage{
 		ID:    id,
 		TTL:   ttl,
@@ -215,33 +191,12 @@ func (ShuffleReplyMessageSerializer) Serialize(msg message.Message) []byte {
 	msgBytes := make([]byte, 8)
 	shuffleMsg := msg.(ShuffleReplyMessage)
 	binary.BigEndian.PutUint32(msgBytes[0:4], shuffleMsg.ID)
-	binary.BigEndian.PutUint32(msgBytes[4:8], uint32(len(shuffleMsg.Peers)))
-	for _, addr := range shuffleMsg.Peers {
-		hostSizeBytes := make([]byte, 4)
-		hostBytes := []byte(addr.Addr().String())
-		binary.BigEndian.PutUint32(hostSizeBytes[0:4], uint32(len(hostBytes)))
-		msgBytes = append(msgBytes, hostSizeBytes...)
-		msgBytes = append(msgBytes, hostBytes...)
-	}
-	return msgBytes
+	return append(msgBytes, peer.SerializePeerArray(shuffleMsg.Peers)...)
 }
 
 func (ShuffleReplyMessageSerializer) Deserialize(msgBytes []byte) message.Message {
 	id := binary.BigEndian.Uint32(msgBytes[0:4])
-	nrHosts := int(binary.BigEndian.Uint32(msgBytes[4:8]))
-	hosts := make([]peer.Peer, nrHosts)
-	bufPos := 8
-	for i := 0; i < nrHosts; i++ {
-		addrSize := int(binary.BigEndian.Uint32(msgBytes[bufPos : bufPos+4]))
-		bufPos += 4
-		addr := string(msgBytes[bufPos : bufPos+addrSize])
-		bufPos += addrSize
-		resolved, err := net.ResolveTCPAddr("tcp", addr)
-		if err != nil {
-			panic(err)
-		}
-		hosts[i] = peer.NewPeer(resolved)
-	}
+	_, hosts := peer.DeserializePeerArray(msgBytes[4:])
 	return ShuffleReplyMessage{
 		ID:    id,
 		Peers: hosts,
