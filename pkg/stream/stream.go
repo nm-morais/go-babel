@@ -10,9 +10,10 @@ import (
 type Stream interface {
 	ListenAddr() net.Addr
 	Dial(addr net.Addr) errors.Error
+	DialWithTimeout(addr net.Addr, timeout time.Duration) errors.Error
 	Read(buf []byte) (int, error)
 	Write(msgBytes []byte) (int, error)
-	SetReadTimeout(duration time.Duration)
+	SetReadTimeout(deadline time.Time)
 	Listen() (Listener, errors.Error)
 	Close() error
 }

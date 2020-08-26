@@ -128,10 +128,12 @@ func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial pee
 
 func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
+	sm.logger.Infof("Starting listener of type %s", reflect.TypeOf(s))
 	listener, err := s.Listen()
 	if err != nil {
 		panic(err.Reason())
 	}
+	sm.logger.Infof("Done starting listener %s", reflect.TypeOf(s))
 	switch s.(type) {
 	case *stream.TCPStream:
 		for {
@@ -142,7 +144,7 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 				continue
 			}
 			mr := messageIO.NewMessageReader(newStream)
-			newStream.SetReadTimeout(p.config.HandshakeTimeout)
+			newStream.SetReadTimeout(time.Now().Add(p.config.HandshakeTimeout))
 			handshakeMsg, err := sm.waitForHandshakeMessage(mr)
 			if err != nil {
 				err.Log(sm.logger)
@@ -182,13 +184,8 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 		}
 	case *stream.UDPStream:
 		for {
-			newStream, err := listener.Accept()
-			if err != nil {
-				err.Log(sm.logger)
-				newStream.Close()
-			}
 			msgBuf := make([]byte, 2048)
-			n, rErr := newStream.Read(msgBuf)
+			n, rErr := s.Read(msgBuf)
 			if rErr != nil {
 				log.Warnf("An error ocurred reading message using UDP:%s ", rErr.Error())
 				continue
@@ -257,7 +254,9 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	}()
 
 	sm.dialingTransportsMutex.Unlock()
-	err := stream.Dial(&net.TCPAddr{IP: toDial.IP(), Port: int(toDial.ProtosPort())})
+	remotePeer := &net.TCPAddr{IP: toDial.IP(), Port: int(toDial.ProtosPort())}
+	sm.logger.Infof("Dialing %+v", remotePeer)
+	err := stream.DialWithTimeout(remotePeer, p.config.DialTimeout)
 	if err != nil {
 		err.Log(sm.logger)
 		dialError(dialingProto, toDial)
@@ -278,7 +277,7 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	}
 
 	mr := messageIO.NewMessageReader(stream)
-	stream.SetReadTimeout(p.config.HandshakeTimeout)
+	stream.SetReadTimeout(time.Now().Add(p.config.HandshakeTimeout))
 	handshakeMsg, err := sm.waitForHandshakeMessage(mr)
 	if err != nil {
 		stream.Close()
@@ -359,7 +358,7 @@ func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Str
 	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.ToString())
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
-		t.SetReadTimeout(p.config.ConnectionReadTimeout)
+		t.SetReadTimeout(time.Now().Add(p.config.ConnectionReadTimeout))
 		msgBuf := make([]byte, 2048)
 		n, err := mr.Read(msgBuf)
 		if err != nil {
@@ -408,25 +407,19 @@ func (sm streamManager) renewHBTimer(peer peer.Peer) {
 }
 
 func (sm streamManager) waitDial(dialerProto protocol.ID, toDial peer.Peer, waitChan chan interface{}) {
-	select {
-	case <-waitChan:
-		proto, _ := p.protocols.Load(dialerProto)
-		_, connUp := sm.inboundTransports.Load(toDial.ToString())
-		if !connUp {
-			proto.(protocolValueType).DialFailed(toDial)
-		} else {
-			p.channelSubscribersMutex.Lock()
-			subs := p.channelSubscribers[toDial.ToString()]
-			if proto.(protocolValueType).DialSuccess(dialerProto, toDial) {
-				subs[dialerProto] = true
-				p.channelSubscribers[toDial.ToString()] = subs
-			}
-			p.channelSubscribersMutex.Unlock()
-		}
-	case <-time.After(p.config.DialTimeout):
-		sm.logger.Error("Protocol waiting to dial has timed out")
-		proto, _ := p.protocols.Load(dialerProto)
+	<-waitChan
+	proto, _ := p.protocols.Load(dialerProto)
+	_, connUp := sm.inboundTransports.Load(toDial.ToString())
+	if !connUp {
 		proto.(protocolValueType).DialFailed(toDial)
+	} else {
+		p.channelSubscribersMutex.Lock()
+		subs := p.channelSubscribers[toDial.ToString()]
+		if proto.(protocolValueType).DialSuccess(dialerProto, toDial) {
+			subs[dialerProto] = true
+			p.channelSubscribers[toDial.ToString()] = subs
+		}
+		p.channelSubscribersMutex.Unlock()
 	}
 }
 

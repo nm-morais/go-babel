@@ -6,12 +6,13 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"time"
 
-	"github.com/nm-morais/go-babel/configs"
 	internalMsg "github.com/nm-morais/go-babel/internal/message"
 	"github.com/nm-morais/go-babel/internal/notificationHub"
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
 	"github.com/nm-morais/go-babel/internal/serialization"
+	"github.com/nm-morais/go-babel/pkg/analytics"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -44,13 +45,23 @@ type IProtocolManager interface {
 }
 */
 
+type ProtocolManagerConfig struct {
+	LogFolder             string
+	HandshakeTimeout      time.Duration
+	HeartbeatTickDuration time.Duration
+	ConnectionReadTimeout time.Duration
+	DialTimeout           time.Duration
+	Peer                  peer.Peer
+}
+
 type protocolValueType = internalProto.WrapperProtocol
 
 var hbProtoInternalID = protocol.ID(1)
 var reservedProtos = []protocol.ID{hbProtoInternalID}
 
 type ProtoManager struct {
-	config                  configs.ProtocolManagerConfig
+	nodeWatcher             analytics.NodeWatcher
+	config                  ProtocolManagerConfig
 	notificationHub         notificationHub.NotificationHub
 	serializationManager    *serialization.Manager
 	protocols               *sync.Map
@@ -66,7 +77,7 @@ var p ProtoManager
 var protoMsgSerializer = internalMsg.ProtoHandshakeMessageSerializer{}
 var appMsgSerializer = internalMsg.AppMessageWrapperSerializer{}
 
-func InitProtoManager(configs configs.ProtocolManagerConfig) ProtoManager {
+func InitProtoManager(configs ProtocolManagerConfig) ProtoManager {
 	p = ProtoManager{
 		config:                  configs,
 		notificationHub:         notificationHub.NewNotificationHub(),
@@ -78,7 +89,6 @@ func InitProtoManager(configs configs.ProtocolManagerConfig) ProtoManager {
 		channelSubscribersMutex: &sync.Mutex{},
 		logger:                  logs.NewLogger(ProtoManagerCaller),
 	}
-	p.serializationManager.RegisterSerializer(internalMsg.HeartbeatMessageType, internalMsg.HeartbeatSerializer{})
 	return p
 }
 
@@ -203,6 +213,14 @@ func RegisterTimer(origin protocol.ID, timer timer.Timer) errors.Error {
 
 func RegisteredProtos() []protocol.ID {
 	return p.protoIds
+}
+
+func InitNodeWatcher(conf analytics.NodeWatcherConf) {
+	p.nodeWatcher = analytics.NewNodeWatcher(p.config.Peer, conf)
+}
+
+func NodeWatcher() analytics.NodeWatcher {
+	return p.nodeWatcher
 }
 
 func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
@@ -355,6 +373,17 @@ func setupLoggers() {
 	streamManagerLogger := p.streamManager.Logger()
 	smMw := io.MultiWriter(all, streamManagerFile)
 	streamManagerLogger.SetOutput(smMw)
+
+	if p.nodeWatcher != nil {
+		nodeWatcherLogger := p.nodeWatcher.Logger()
+		nodeWatcherFile, err := os.Create(logFolder + "nodeWatcher.log")
+		if err != nil {
+			log.Panic(err)
+		}
+
+		nmMw := io.MultiWriter(all, nodeWatcherFile)
+		nodeWatcherLogger.SetOutput(nmMw)
+	}
 }
 
 func Start() {
@@ -362,6 +391,7 @@ func Start() {
 	setupLoggers()
 
 	for _, l := range p.listeners {
+		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
 		go p.streamManager.AcceptConnectionsAndNotify(l)
 	}
 

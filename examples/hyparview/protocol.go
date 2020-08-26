@@ -14,7 +14,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 type Hyparview struct {
@@ -24,7 +24,7 @@ type Hyparview struct {
 	pendingDials   map[string]bool
 	lastShuffleMsg ShuffleMessage
 	timeStart      time.Time
-	logger         *log.Logger
+	logger         *logrus.Logger
 }
 
 const joinTime = 10 * time.Second
@@ -57,7 +57,7 @@ func (h *Hyparview) Name() string {
 	return name
 }
 
-func (h *Hyparview) Logger() *log.Logger {
+func (h *Hyparview) Logger() *logrus.Logger {
 	return h.logger
 }
 
@@ -81,7 +81,7 @@ func (h *Hyparview) Start() {
 	}
 	toSend := JoinMessage{}
 	h.logger.Info("Sending join message...")
-	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewUDPDialer())
+	pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
 }
 
 func (h *Hyparview) InConnRequested(peer peer.Peer) bool {
@@ -329,7 +329,7 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {
 			toSend := JoinMessage{}
 			h.pendingDials[h.contactNode.ToString()] = true
-			pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewUDPDialer())
+			pkg.SendMessageSideStream(toSend, h.contactNode, protoID, []protocol.ID{protoID}, stream.NewTCPDialer())
 			return
 		}
 		if !h.isActiveViewFull() && len(h.pendingDials)+len(h.activeView) <= activeViewSize && len(h.passiveView) > 0 {
@@ -479,6 +479,7 @@ func (h *Hyparview) addPeerToActiveView(newPeer peer.Peer) {
 
 	h.logger.Warnf("Added peer %s to active view", newPeer.ToString())
 	h.activeView = append(h.activeView, newPeer)
+	pkg.NodeWatcher().Watch(newPeer, h.ID())
 	h.logHyparviewState()
 }
 
@@ -539,5 +540,5 @@ func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
-	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewUDPDialer())
+	pkg.SendMessageSideStream(msg, target, h.ID(), []protocol.ID{h.ID()}, stream.NewTCPDialer())
 }

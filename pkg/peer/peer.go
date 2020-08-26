@@ -41,23 +41,26 @@ func (p peer) AnalyticsPort() uint16 {
 }
 
 func (p peer) ToString() string {
-	return fmt.Sprintf("%s:%d/%d", p.ip, p.protosPort, p.analyticsPort)
+	return fmt.Sprintf("%s:%d", p.ip, p.protosPort)
 }
 
 func (p peer) Equals(otherPeer Peer) bool {
-	return p.ip.Equal(otherPeer.IP())
+	return p.ToString() == otherPeer.ToString()
 }
 
 func (p peer) SerializeToBinary() []byte {
-	peerBytes := make([]byte, 0, 8)
-	peerBytes = append(peerBytes, p.IP()...)
+	peerBytes := make([]byte, 8)
+	for idx, b := range p.IP().To4() {
+		peerBytes[idx] = b
+	}
 	binary.BigEndian.PutUint16(peerBytes[4:], p.ProtosPort())
 	binary.BigEndian.PutUint16(peerBytes[6:], p.AnalyticsPort())
 	return peerBytes
 }
 
 func DeserializePeer(buf []byte) (int, Peer) {
-	return 8, NewPeer(buf[0:4], binary.BigEndian.Uint16(buf[4:6]), binary.BigEndian.Uint16(buf[6:8]))
+	peer := NewPeer(buf[0:4], binary.BigEndian.Uint16(buf[4:6]), binary.BigEndian.Uint16(buf[6:8]))
+	return 8, peer
 }
 
 func SerializePeerArray(peers []Peer) []byte {

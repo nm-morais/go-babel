@@ -27,12 +27,17 @@ func (t *UDPStream) ListenAddr() net.Addr {
 	return t.listenAddr
 }
 
-func (t *UDPStream) SetReadTimeout(duration time.Duration) {
-	panic("not supported")
+func (t *UDPStream) SetReadTimeout(deadline time.Time) {
+	t.packetConn.SetReadDeadline(deadline)
 }
 
 func (t *UDPStream) Listen() (Listener, errors.Error) {
-	return UDPListener{addr: t.listenAddr}, nil
+	conn, err := net.ListenUDP("udp", t.listenAddr)
+	if err != nil {
+		panic(err)
+	}
+	t.packetConn = conn
+	return nil, nil
 }
 
 func (t *UDPStream) Dial(toDial net.Addr) errors.Error {
@@ -42,6 +47,20 @@ func (t *UDPStream) Dial(toDial net.Addr) errors.Error {
 	}
 	t.targetAddr = resolved
 	conn, err := net.Dial("udp", resolved.String())
+	if err != nil {
+		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
+	}
+	t.packetConn = conn
+	return nil
+}
+
+func (t *UDPStream) DialWithTimeout(toDial net.Addr, timeout time.Duration) errors.Error {
+	resolved, err := net.ResolveUDPAddr("udp", toDial.String())
+	if err != nil {
+		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
+	}
+	t.targetAddr = resolved
+	conn, err := net.DialTimeout("udp", resolved.String(), timeout)
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), UDPTransportCaller)
 	}
@@ -59,20 +78,4 @@ func (t *UDPStream) Read(msgBytes []byte) (int, error) {
 
 func (t *UDPStream) Close() error {
 	return t.packetConn.Close()
-}
-
-type UDPListener struct {
-	addr *net.UDPAddr
-}
-
-func (l UDPListener) Listener() Listener {
-	return l
-}
-
-func (l UDPListener) Accept() (Stream, errors.Error) {
-	conn, err := net.ListenUDP("udp", l.addr)
-	if err != nil {
-		panic(err)
-	}
-	return &UDPStream{listenAddr: l.addr, packetConn: conn}, nil
 }
