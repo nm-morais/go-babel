@@ -217,6 +217,7 @@ func (nm *NodeManagerImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 		return udpConn, nil
 	}
 
+	nm.logger.Warnf("falling back to TCP")
 	// attempting to connect by TCP
 	rAddrTcp := &net.TCPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
 	tcpConn, err := net.DialTimeout("tcp", rAddrTcp.String(), nm.conf.TcpTestTimeout)
@@ -234,10 +235,12 @@ func (nm *NodeManagerImpl) start() {
 func (nm *NodeManagerImpl) attemptRepairStreamTo(p peer.Peer) {
 	stream, err := nm.establishStreamTo(p)
 	nm.watchingLock.Lock()
+	defer nm.watchingLock.Unlock()
 	currStatus := nm.watching[p.ToString()]
 	if err != nil {
 		currStatus.nrRetries++
 		if currStatus.nrRetries >= nm.conf.MaxRedials {
+			nm.logger.Warnf("Peer %s removed because it has exceeded max re-dials (%d/%d)", p.ToString(), currStatus.nrRetries, nm.conf.MaxRedials)
 			delete(nm.watching, p.ToString())
 			return
 		}
@@ -248,7 +251,6 @@ func (nm *NodeManagerImpl) attemptRepairStreamTo(p peer.Peer) {
 	currStatus.mr = messageIO.NewMessageReader(stream)
 	currStatus.mw = messageIO.NewMessageWriter(stream)
 	nm.watching[p.ToString()] = currStatus
-	nm.watchingLock.Unlock()
 }
 
 func (nm *NodeManagerImpl) startUDPServer() {

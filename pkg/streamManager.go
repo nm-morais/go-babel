@@ -326,7 +326,6 @@ func (sm streamManager) SendMessage(message []byte, peer peer.Peer) errors.Error
 		}
 	}
 
-	sm.renewHBTimer(peer)
 	_, err := outboundStream.(outboundStreamValueType).mw.Write(message)
 	if err != nil {
 		sm.logger.Error(err)
@@ -383,21 +382,6 @@ func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Str
 			} else {
 				sm.logger.Panicf("Ignored message: %+v", protoMsg)
 			}
-		}
-	}
-}
-
-func (sm streamManager) renewHBTimer(peer peer.Peer) {
-	defer func() {
-		if r := recover(); r != nil {
-			sm.logger.Warnf("Error occurred renewing hb timer: %s", r)
-		}
-	}()
-	hbChan, ok := sm.hbChannels.Load(peer.ToString())
-	if ok {
-		select {
-		case <-hbChan.(hbTimerRoutineChannels).finish:
-		case hbChan.(hbTimerRoutineChannels).renew <- struct{}{}:
 		}
 	}
 }
