@@ -6,36 +6,36 @@ import (
 	"github.com/nm-morais/go-babel/pkg/peer"
 )
 
-type heartbeatMessage struct {
+type HeartbeatMessage struct {
 	TimeStamp  time.Time
 	IsReply    bool
 	ForceReply bool
 	IsTest     bool
-	sender     peer.Peer
+	Sender     peer.Peer
 }
 
-func NewHBMessageForceReply(sender peer.Peer) heartbeatMessage {
-	return heartbeatMessage{
+func NewHBMessageForceReply(sender peer.Peer) HeartbeatMessage {
+	return HeartbeatMessage{
 		ForceReply: true,
-		sender:     sender,
+		Sender:     sender,
 		IsReply:    false,
 		IsTest:     false,
 		TimeStamp:  time.Now(),
 	}
 }
 
-func NewTestHBMessage(sender peer.Peer) heartbeatMessage {
-	return heartbeatMessage{
-		sender: sender,
+func NewTestHBMessage(sender peer.Peer) HeartbeatMessage {
+	return HeartbeatMessage{
+		Sender: sender,
 		IsTest: true,
 	}
 }
 
-func serializeHeartbeatMessage(m heartbeatMessage) []byte {
+func SerializeHeartbeatMessage(m HeartbeatMessage) []byte {
 	if m.IsTest {
-		return append([]byte{1}, m.sender.SerializeToBinary()...)
+		return append([]byte{1}, m.Sender.SerializeToBinary()...)
 	}
-	peerBytes := append([]byte{0}, m.sender.SerializeToBinary()...)
+	peerBytes := append([]byte{0}, m.Sender.SerializeToBinary()...)
 
 	var remainingBytes = peerBytes
 
@@ -59,13 +59,13 @@ func serializeHeartbeatMessage(m heartbeatMessage) []byte {
 	return append(remainingBytes, tsBytes...)
 }
 
-func deserializeHeartbeatMessage(bytes []byte) heartbeatMessage {
+func DeserializeHeartbeatMessage(bytes []byte) HeartbeatMessage {
 	currPos := 1
 	if bytes[0] == 1 { // isTest
 		_, p := peer.DeserializePeer(bytes[currPos:])
-		return heartbeatMessage{
+		return HeartbeatMessage{
 			IsTest: true,
-			sender: p,
+			Sender: p,
 		}
 	}
 	peerSize, p := peer.DeserializePeer(bytes[currPos:])
@@ -82,12 +82,12 @@ func deserializeHeartbeatMessage(bytes []byte) heartbeatMessage {
 	if err != nil {
 		panic(err)
 	}
-	hbMsg := heartbeatMessage{
+	hbMsg := HeartbeatMessage{
 		TimeStamp:  ts,
 		IsReply:    isReply,
 		ForceReply: forceReply,
 		IsTest:     false,
-		sender:     p,
+		Sender:     p,
 	}
 	return hbMsg
 }

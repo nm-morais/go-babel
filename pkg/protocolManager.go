@@ -12,7 +12,6 @@ import (
 	"github.com/nm-morais/go-babel/internal/notificationHub"
 	internalProto "github.com/nm-morais/go-babel/internal/protocol"
 	"github.com/nm-morais/go-babel/internal/serialization"
-	"github.com/nm-morais/go-babel/pkg/analytics"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -60,7 +59,7 @@ var hbProtoInternalID = protocol.ID(1)
 var reservedProtos = []protocol.ID{hbProtoInternalID}
 
 type ProtoManager struct {
-	nodeWatcher             analytics.NodeWatcher
+	nodeWatcher             NodeWatcher
 	config                  ProtocolManagerConfig
 	notificationHub         notificationHub.NotificationHub
 	serializationManager    *serialization.Manager
@@ -215,11 +214,11 @@ func RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func InitNodeWatcher(conf analytics.NodeWatcherConf) {
-	p.nodeWatcher = analytics.NewNodeWatcher(p.config.Peer, conf)
+func InitNodeWatcher(conf NodeWatcherConf) {
+	p.nodeWatcher = NewNodeWatcher(p.config.Peer, conf)
 }
 
-func NodeWatcher() analytics.NodeWatcher {
+func GetNodeWatcher() NodeWatcher {
 	return p.nodeWatcher
 }
 

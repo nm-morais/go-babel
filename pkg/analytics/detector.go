@@ -36,6 +36,13 @@ func (d *Detector) Ping(now time.Time) {
 }
 
 // Phi calculates the suspicion level at time 'now' that the remote end has failed
+func (d *Detector) NrSamples() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.w.Len()
+}
+
+// Phi calculates the suspicion level at time 'now' that the remote end has failed
 func (d *Detector) Phi(now time.Time) float64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
