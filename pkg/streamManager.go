@@ -7,7 +7,6 @@ import (
 	"net"
 	"reflect"
 	"sync"
-	"time"
 
 	internalMsg "github.com/nm-morais/go-babel/internal/message"
 	"github.com/nm-morais/go-babel/internal/messageIO"
@@ -144,7 +143,6 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 				continue
 			}
 			mr := messageIO.NewMessageReader(newStream)
-			newStream.SetReadTimeout(time.Now().Add(p.config.HandshakeTimeout))
 			handshakeMsg, err := sm.waitForHandshakeMessage(mr)
 			if err != nil {
 				err.Log(sm.logger)
@@ -277,7 +275,6 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	}
 
 	mr := messageIO.NewMessageReader(stream)
-	stream.SetReadTimeout(time.Now().Add(p.config.HandshakeTimeout))
 	handshakeMsg, err := sm.waitForHandshakeMessage(mr)
 	if err != nil {
 		stream.Close()
@@ -358,7 +355,6 @@ func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Str
 	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.ToString())
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
-		t.SetReadTimeout(time.Now().Add(p.config.ConnectionReadTimeout))
 		msgBuf := make([]byte, 2048)
 		n, err := mr.Read(msgBuf)
 		if err != nil {

@@ -40,15 +40,15 @@ func serializeHeartbeatMessage(m heartbeatMessage) []byte {
 	var remainingBytes = peerBytes
 
 	if m.IsReply {
-		remainingBytes = append(remainingBytes, byte(0))
-	} else {
 		remainingBytes = append(remainingBytes, byte(1))
+	} else {
+		remainingBytes = append(remainingBytes, byte(0))
 	}
 
 	if m.ForceReply {
-		remainingBytes = append(remainingBytes, byte(0))
-	} else {
 		remainingBytes = append(remainingBytes, byte(1))
+	} else {
+		remainingBytes = append(remainingBytes, byte(0))
 	}
 
 	tsBytes, err := m.TimeStamp.MarshalBinary()
@@ -60,19 +60,20 @@ func serializeHeartbeatMessage(m heartbeatMessage) []byte {
 }
 
 func deserializeHeartbeatMessage(bytes []byte) heartbeatMessage {
-	currPos := 0
+	currPos := 1
 	if bytes[0] == 1 { // isTest
-		_, p := peer.DeserializePeer(bytes[1:])
+		_, p := peer.DeserializePeer(bytes[currPos:])
 		return heartbeatMessage{
 			IsTest: true,
 			sender: p,
 		}
 	}
-	currPos++
-	peerSize, p := peer.DeserializePeer(bytes[1:])
+	peerSize, p := peer.DeserializePeer(bytes[currPos:])
 	currPos += peerSize
+
 	isReply := bytes[currPos] == 1
 	currPos++
+
 	forceReply := bytes[currPos] == 1
 	currPos++
 
@@ -81,12 +82,12 @@ func deserializeHeartbeatMessage(bytes []byte) heartbeatMessage {
 	if err != nil {
 		panic(err)
 	}
-
-	return heartbeatMessage{
+	hbMsg := heartbeatMessage{
 		TimeStamp:  ts,
 		IsReply:    isReply,
 		ForceReply: forceReply,
 		IsTest:     false,
 		sender:     p,
 	}
+	return hbMsg
 }

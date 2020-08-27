@@ -58,8 +58,8 @@ func main() {
 		NewLatencyWeight:        0.1,
 		NrTestMessages:          3,
 		OldLatencyWeight:        0.9,
-		TcpTestTimeout:          5,
-		UdpTestTimeout:          5,
+		TcpTestTimeout:          5 * time.Second,
+		UdpTestTimeout:          5 * time.Second,
 		WindowSize:              5,
 	}
 

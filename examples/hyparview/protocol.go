@@ -133,13 +133,13 @@ func (h *Hyparview) DialFailed(peer peer.Peer) {
 func (h *Hyparview) MessageDelivered(message message.Message, peer peer.Peer) {
 	if message.Type() == DisconnectMessageType {
 		pkg.Disconnect(h.ID(), peer)
-		h.logger.Infof("Disconnecting from %s", message, peer.ToString())
+		h.logger.Infof("Disconnecting from %s", peer.ToString())
 	}
 	h.logger.Infof("Message %+v was sent to %s", message, peer.ToString())
 }
 
 func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
-	h.logger.Warnf("Message %s was not sent to %s because: ", reflect.TypeOf(message), peer.ToString(), error.Reason())
+	h.logger.Warnf("Message %s was not sent to %s because: %s", reflect.TypeOf(message), peer.ToString(), error.Reason())
 }
 
 // ---------------- Protocol handlers (messages) ----------------
