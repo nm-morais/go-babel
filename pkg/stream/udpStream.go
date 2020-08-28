@@ -27,8 +27,11 @@ func (t *UDPStream) ListenAddr() net.Addr {
 	return t.listenAddr
 }
 
-func (t *UDPStream) SetReadTimeout(deadline time.Time) {
-	t.packetConn.SetReadDeadline(deadline)
+func (t *UDPStream) SetReadTimeout(deadline time.Time) errors.Error {
+	if err := t.packetConn.SetReadDeadline(deadline); err != nil {
+		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
+	}
+	return nil
 }
 
 func (t *UDPStream) Listen() (Listener, errors.Error) {

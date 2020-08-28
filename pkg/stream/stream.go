@@ -13,7 +13,7 @@ type Stream interface {
 	DialWithTimeout(addr net.Addr, timeout time.Duration) errors.Error
 	Read(buf []byte) (int, error)
 	Write(msgBytes []byte) (int, error)
-	SetReadTimeout(deadline time.Time)
+	SetReadTimeout(deadline time.Time) errors.Error
 	Listen() (Listener, errors.Error)
 	Close() error
 }

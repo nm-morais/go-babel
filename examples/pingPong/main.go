@@ -6,7 +6,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/nm-morais/go-babel/configs"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
@@ -38,7 +37,7 @@ func main() {
 		analyticsPortVar = rand.Intn(maxAnalyticsPort-minAnalyticsPort) + minAnalyticsPort
 	}
 
-	config := configs.ProtocolManagerConfig{
+	config := pkg.ProtocolManagerConfig{
 		LogFolder:             "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
 		HandshakeTimeout:      1 * time.Second,
 		HeartbeatTickDuration: 1 * time.Second,
@@ -46,6 +45,7 @@ func main() {
 		ConnectionReadTimeout: 5 * time.Second,
 		Peer:                  peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(protosPortVar), uint16(analyticsPortVar)),
 	}
+
 	pkg.InitProtoManager(config)
 	contactNode := peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(1200), uint16(1200))
 	pkg.RegisterListener(stream.NewTCPListener(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())}))

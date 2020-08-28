@@ -25,9 +25,11 @@ func NewTCPDialer() Stream {
 func (t *TCPStream) ListenAddr() net.Addr {
 	return t.listenAddr
 }
-
-func (t *TCPStream) SetReadTimeout(deadline time.Time) {
-	t.conn.SetReadDeadline(deadline)
+func (t *TCPStream) SetReadTimeout(deadline time.Time) errors.Error {
+	if err := t.conn.SetReadDeadline(deadline); err != nil {
+		return errors.NonFatalError(500, err.Error(), TCPTransportCaller)
+	}
+	return nil
 }
 
 func (t *TCPStream) Listen() (Listener, errors.Error) {

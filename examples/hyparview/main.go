@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nm-morais/go-babel/pkg"
-	"github.com/nm-morais/go-babel/pkg/analytics"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/stream"
 )
@@ -51,12 +50,13 @@ func main() {
 
 	fmt.Println("Self peer: ", protoManagerConf.Peer.ToString())
 
-	nodeWatcherConf := analytics.NodeWatcherConf{
+	nodeWatcherConf := pkg.NodeWatcherConf{
 		MaxRedials:              3,
 		HbTickDuration:          1 * time.Second,
-		MinSamplesFaultDetector: 3,
+		MinSamplesFaultDetector: 5,
 		NewLatencyWeight:        0.1,
-		NrTestMessages:          3,
+		NrTestMessagesToSend:    3,
+		NrTestMessagesToReceive: 1,
 		OldLatencyWeight:        0.9,
 		TcpTestTimeout:          5 * time.Second,
 		UdpTestTimeout:          5 * time.Second,

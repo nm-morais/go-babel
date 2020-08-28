@@ -352,6 +352,7 @@ func (sm streamManager) Disconnect(peer peer.Peer) {
 func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Stream, newPeer peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Handling peer stream %s", newPeer.ToString())
 	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.ToString())
+
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
 		msgBuf := make([]byte, 2048)
@@ -418,25 +419,6 @@ func (sm streamManager) handleOutboundTransportFailure(remotePeer peer.Peer) err
 	sm.dialingTransportsMutex.Unlock()
 	outTransportFailure(remotePeer)
 	return nil
-}
-
-func (sm streamManager) logConnections() {
-	sm.logger.Info("------------- Active Connections -------------")
-	var toLog string
-	toLog = "Inbound connections : "
-	sm.inboundTransports.Range(func(peer, conn interface{}) bool {
-		toLog += fmt.Sprintf("%s, ", peer.(string))
-		return true
-	})
-	sm.logger.Info(toLog)
-	toLog = ""
-	toLog = "outbound connections : "
-	sm.inboundTransports.Range(func(peer, conn interface{}) bool {
-		toLog += fmt.Sprintf("%s, ", peer.(string))
-		return true
-	})
-	sm.logger.Info(toLog)
-	sm.logger.Info("----------------------------------------------")
 }
 
 func (sm streamManager) handleTmpStream(newPeer peer.Peer, transport io.Reader) {

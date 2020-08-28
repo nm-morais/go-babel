@@ -3,11 +3,7 @@ package analytics
 import (
 	"sync"
 	"time"
-
-	"github.com/nm-morais/go-babel/pkg/errors"
 )
-
-const latencyCalculatorCaller = "latencyCalculator"
 
 type LatencyCalculator struct {
 	mu                    sync.Mutex
@@ -37,15 +33,15 @@ func (l *LatencyCalculator) AddMeasurement(measurement time.Duration) {
 	l.currValue = time.Duration(float32(measurement)*l.newMeasutementsWeight + float32(l.currValue)*l.oldMeasutementsWeight)
 }
 
-func (l *LatencyCalculator) CurrValue() (time.Duration, errors.Error) {
+func (l *LatencyCalculator) CurrValue() time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.nMeasurements == 0 {
-		return 0, errors.NonFatalError(404, "have no latency measurements", latencyCalculatorCaller)
+		panic("have no latency measurements")
 	}
 
-	return l.currValue, nil
+	return l.currValue
 }
 
 func (l *LatencyCalculator) NrMeasurements() int {

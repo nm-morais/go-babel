@@ -479,7 +479,7 @@ func (h *Hyparview) addPeerToActiveView(newPeer peer.Peer) {
 
 	h.logger.Warnf("Added peer %s to active view", newPeer.ToString())
 	h.activeView = append(h.activeView, newPeer)
-	pkg.NodeWatcher().Watch(newPeer, h.ID())
+	pkg.GetNodeWatcher().Watch(newPeer, h.ID())
 	h.logHyparviewState()
 }
 
