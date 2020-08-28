@@ -3,8 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
+	"os"
+	"os/signal"
+	"runtime/pprof"
 	"time"
 
 	"github.com/nm-morais/go-babel/pkg"
@@ -23,13 +27,34 @@ func main() {
 	var analyticsPortVar int
 	var randProtosPort bool
 	var randAnalyticsPort bool
+	var cpuprofile string
 
 	flag.IntVar(&protosPortVar, "protos", 1200, "protos")
 	flag.BoolVar(&randProtosPort, "rprotos", false, "port")
-
+	flag.StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile to file")
 	flag.IntVar(&analyticsPortVar, "analytics", 1201, "analytics")
 	flag.BoolVar(&randAnalyticsPort, "ranalytics", false, "port")
 	flag.Parse()
+
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			panic(err)
+		}
+	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for sig := range c {
+			fmt.Println("Sig:", sig)
+			pprof.StopCPUProfile()
+			os.Exit(0)
+		}
+	}()
 
 	if randProtosPort {
 		protosPortVar = rand.Intn(maxProtosPort-minProtosPort) + minProtosPort
@@ -49,7 +74,6 @@ func main() {
 	}
 
 	fmt.Println("Self peer: ", protoManagerConf.Peer.ToString())
-
 	nodeWatcherConf := pkg.NodeWatcherConf{
 		MaxRedials:              3,
 		HbTickDuration:          1 * time.Second,
@@ -62,7 +86,6 @@ func main() {
 		UdpTestTimeout:          5 * time.Second,
 		WindowSize:              5,
 	}
-
 	contactNode := peer.NewPeer(net.IPv4(127, 0, 0, 1), uint16(1200), uint16(1201))
 
 	fmt.Println(fmt.Sprintf("Contact node IP %s", contactNode.IP()))

@@ -179,7 +179,6 @@ func (nm *NodeWatcherImpl) startHbRoutine(p peer.Peer) {
 		if !ok {
 			return
 		}
-
 		nm.watchingLock.RUnlock()
 		toSend := analytics.NewHBMessageForceReply(nm.selfPeer)
 		switch nodeInfo.peerConn.(type) {
@@ -229,23 +228,21 @@ func (nm *NodeWatcherImpl) GetNodeInfo(peer peer.Peer) (*NodeInfo, errors.Error)
 }
 
 func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (*NodeInfo, errors.Error) {
-	nm.watchingLock.Lock()
+	nm.watchingLock.RLock()
 	nodeInfo, ok := nm.watching[peer.ToString()]
 	if !ok {
-		nm.watchingLock.Unlock()
+		nm.watchingLock.RUnlock()
 		return nil, errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
-	nm.watchingLock.Unlock()
-
+	nm.watchingLock.RUnlock()
 	select {
 	case <-nodeInfo.enoughSamples:
-		nm.watchingLock.Lock() // re-check if node died in the meantime
+		nm.watchingLock.RLock()
+		defer nm.watchingLock.RUnlock()
 		nodeInfo, ok := nm.watching[peer.ToString()]
 		if !ok {
-			nm.watchingLock.Unlock()
 			return nil, errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 		}
-		nm.watchingLock.Unlock()
 		return &nodeInfo, nil
 	case <-time.After(time.Until(deadline)):
 		return nil, errors.NonFatalError(404, "timed out waiting for enough samples", nodeWatcherCaller)
@@ -457,7 +454,7 @@ func (nm *NodeWatcherImpl) handleUDPConnection(inConn *net.UDPConn) {
 			nm.logger.Warn(rErr)
 			return
 		}
-		go nm.handleHBMessage(msgBuf[:n], inConn)
+		nm.handleHBMessage(msgBuf[:n], inConn)
 	}
 }
 
@@ -533,13 +530,15 @@ func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage) {
 	sender := hb.Sender
 	timeReceived := time.Now()
 	timeTaken := time.Since(hb.TimeStamp)
-	nm.watchingLock.Lock()
+	nm.watchingLock.RLock()
 	nodeInfo, ok := nm.watching[sender.ToString()]
 	if !ok {
-		nm.watchingLock.Unlock()
+		nm.watchingLock.RUnlock()
 		nm.logger.Warn("Received reply for unwatched node, discarding...")
 		return
 	}
+	nm.watchingLock.RUnlock()
+
 	nodeInfo.Detector.Ping(timeReceived)
 	nodeInfo.LatencyCalc.AddMeasurement(timeTaken)
 	if nodeInfo.Detector.NrSamples() >= nm.conf.MinSamplesFaultDetector && nodeInfo.LatencyCalc.NrMeasurements() >= nm.conf.MinSamplesLatencyEstimate {
@@ -552,5 +551,4 @@ func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage) {
 			close(nodeInfo.enoughSamples)
 		}
 	}
-	nm.watchingLock.Unlock()
 }
