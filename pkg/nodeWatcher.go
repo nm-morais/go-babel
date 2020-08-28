@@ -28,6 +28,9 @@ type Condition struct {
 	CondFunc                  ConditionFunc
 	ProtoId                   protocol.ID
 	Notification              notification.Notification
+	Repeatable                bool
+	EnableGracePeriod         bool
+	GracePeriod               time.Duration
 }
 
 type NodeInfo struct {
@@ -79,7 +82,7 @@ type NodeWatcher interface {
 	Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error
 	GetNodeInfo(peer peer.Peer) (*NodeInfo, errors.Error)
 	GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (*NodeInfo, errors.Error)
-	NotifyOnCondition(p peer.Peer, notification notification.Notification, cond ConditionFunc, evalConditionTickDuration time.Duration, protoID protocol.ID) (int, errors.Error)
+	NotifyOnCondition(c Condition) (int, errors.Error)
 	Logger() *logrus.Logger
 }
 
@@ -204,6 +207,7 @@ func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.E
 	if ok {
 		return errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
+	watchedPeer.peerConn.Close()
 	delete(nm.watching, peer.ToString())
 	close(watchedPeer.enoughSamples)
 	return nil
@@ -248,18 +252,12 @@ func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time
 	}
 }
 
-func (nm *NodeWatcherImpl) NotifyOnCondition(p peer.Peer, notification notification.Notification, cond ConditionFunc, evalConditionTickDuration time.Duration, protoID protocol.ID) (int, errors.Error) {
+func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
 	nm.conditionsLock.Lock()
 	condId := rand.Int()
-	newCond := Condition{
-		EvalConditionTickDuration: evalConditionTickDuration,
-		CondFunc:                  cond,
-		ProtoId:                   protoID,
-		Notification:              notification,
-	}
 	pqItem := &analytics.Item{
-		Value:    newCond,
-		Priority: time.Until(time.Now().Add(evalConditionTickDuration)).Nanoseconds(),
+		Value:    c,
+		Priority: time.Now().Add(c.EvalConditionTickDuration).UnixNano(),
 		Key:      condId,
 	}
 	nm.conditions.Push(pqItem)
@@ -290,14 +288,20 @@ func (nm *NodeWatcherImpl) evalCondsPeriodic() errors.Error {
 			nm.conditions.Push(nextItem)
 			nm.conditionsLock.Unlock()
 			continue
-		case <-time.After(time.Duration(nextItem.Priority)):
+		case <-time.After(time.Until(time.Unix(0, nextItem.Priority))):
 			nm.watchingLock.Lock()
 			nodeStats := nm.watching[cond.Peer.ToString()]
 			nm.watchingLock.Unlock()
 			if cond.CondFunc(nodeStats) {
 				SendNotification(cond.Notification)
+				if cond.Repeatable {
+					if cond.EnableGracePeriod {
+						nm.conditions.Update(nextItem, cond, time.Now().Add(cond.GracePeriod).UnixNano())
+						continue
+					}
+					nm.conditions.Update(nextItem, cond, time.Now().Add(cond.EvalConditionTickDuration).UnixNano())
+				}
 			}
-			nm.conditions.Update(nextItem, cond, time.Until(time.Now().Add(cond.EvalConditionTickDuration)).Nanoseconds())
 		}
 	}
 }
