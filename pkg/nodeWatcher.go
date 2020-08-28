@@ -456,7 +456,7 @@ func (nm *NodeWatcherImpl) handleUDPConnection(inConn *net.UDPConn) {
 			nm.logger.Warn(rErr)
 			return
 		}
-		nm.handleHBMessage(msgBuf[:n], inConn)
+		go nm.handleHBMessage(msgBuf[:n], inConn)
 	}
 }
 
