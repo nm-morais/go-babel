@@ -10,45 +10,40 @@ type HeartbeatMessage struct {
 	TimeStamp  time.Time
 	IsReply    bool
 	ForceReply bool
-	IsTest     bool
 	Sender     peer.Peer
 }
 
-func NewHBMessageForceReply(sender peer.Peer) HeartbeatMessage {
+func NewHBMessageNoReply(sender peer.Peer) HeartbeatMessage {
 	return HeartbeatMessage{
-		ForceReply: true,
 		Sender:     sender,
+		ForceReply: false,
 		IsReply:    false,
-		IsTest:     false,
 		TimeStamp:  time.Now(),
 	}
 }
 
-func NewTestHBMessage(sender peer.Peer) HeartbeatMessage {
+func NewHBMessageForceReply(sender peer.Peer) HeartbeatMessage {
 	return HeartbeatMessage{
-		Sender: sender,
-		IsTest: true,
+		Sender:     sender,
+		ForceReply: true,
+		IsReply:    false,
+		TimeStamp:  time.Now(),
 	}
 }
 
 func SerializeHeartbeatMessage(m HeartbeatMessage) []byte {
-	if m.IsTest {
-		return append([]byte{1}, m.Sender.SerializeToBinary()...)
-	}
-	peerBytes := append([]byte{0}, m.Sender.SerializeToBinary()...)
-
-	var remainingBytes = peerBytes
+	peerBytes := m.Sender.SerializeToBinary()
 
 	if m.IsReply {
-		remainingBytes = append(remainingBytes, byte(1))
+		peerBytes = append(peerBytes, byte(1))
 	} else {
-		remainingBytes = append(remainingBytes, byte(0))
+		peerBytes = append(peerBytes, byte(0))
 	}
 
 	if m.ForceReply {
-		remainingBytes = append(remainingBytes, byte(1))
+		peerBytes = append(peerBytes, byte(1))
 	} else {
-		remainingBytes = append(remainingBytes, byte(0))
+		peerBytes = append(peerBytes, byte(0))
 	}
 
 	tsBytes, err := m.TimeStamp.MarshalBinary()
@@ -56,18 +51,11 @@ func SerializeHeartbeatMessage(m HeartbeatMessage) []byte {
 		panic(err)
 	}
 
-	return append(remainingBytes, tsBytes...)
+	return append(peerBytes, tsBytes...)
 }
 
 func DeserializeHeartbeatMessage(bytes []byte) HeartbeatMessage {
-	currPos := 1
-	if bytes[0] == 1 { // isTest
-		_, p := peer.DeserializePeer(bytes[currPos:])
-		return HeartbeatMessage{
-			IsTest: true,
-			Sender: p,
-		}
-	}
+	currPos := 0
 	peerSize, p := peer.DeserializePeer(bytes[currPos:])
 	currPos += peerSize
 
@@ -82,11 +70,11 @@ func DeserializeHeartbeatMessage(bytes []byte) HeartbeatMessage {
 	if err != nil {
 		panic(err)
 	}
+
 	hbMsg := HeartbeatMessage{
 		TimeStamp:  ts,
 		IsReply:    isReply,
 		ForceReply: forceReply,
-		IsTest:     false,
 		Sender:     p,
 	}
 	return hbMsg

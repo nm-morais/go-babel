@@ -310,7 +310,6 @@ func (nm *NodeWatcherImpl) Logger() *logrus.Logger {
 func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Error) {
 
 	//nm.logger.Infof("Establishing stream to %s", p.ToString())
-	testMsg := analytics.HeartbeatMessage{Sender: nm.selfPeer, IsTest: true, IsReply: false, ForceReply: false}
 	udpTestDeadline := time.Now().Add(nm.conf.UdpTestTimeout)
 	rAddrUdp := &net.UDPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
 	udpConn, err := net.DialUDP("udp", nil, rAddrUdp)
@@ -320,7 +319,7 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 
 	for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
 		//nm.logger.Infof("Writing test message to: %s", p.ToString())
-		_, err := udpConn.Write(analytics.SerializeHeartbeatMessage(testMsg))
+		_, err := udpConn.Write(analytics.SerializeHeartbeatMessage(analytics.NewHBMessageForceReply(nm.selfPeer)))
 		if err != nil {
 			break
 		}
@@ -343,7 +342,10 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 			}
 			receivedMsgs++
 		}
-		udpConn.SetReadDeadline(time.Time{})
+		if err := udpConn.SetReadDeadline(time.Time{}); err != nil {
+			nm.logger.Error(err)
+		}
+
 	}()
 	<-done
 	if receivedMsgs == nm.conf.NrTestMessagesToReceive {
@@ -460,14 +462,6 @@ func (nm *NodeWatcherImpl) handleUDPConnection(inConn *net.UDPConn) {
 
 func (nm *NodeWatcherImpl) handleHBMessage(hbBytes []byte, mw io.Writer) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
-	if hb.IsTest {
-		//nm.logger.Infof("handling hb test message %+v", hb)
-		_, err := mw.Write(analytics.SerializeHeartbeatMessage(hb))
-		if err != nil {
-			nm.logger.Error(err)
-		}
-		return nil
-	}
 	if hb.IsReply {
 		//nm.logger.Infof("handling hb reply message %+v", hb)
 		nm.registerHBReply(hb)
@@ -480,7 +474,6 @@ func (nm *NodeWatcherImpl) handleHBMessage(hbBytes []byte, mw io.Writer) errors.
 			Sender:     nm.selfPeer,
 			IsReply:    true,
 			ForceReply: false,
-			IsTest:     false,
 		}
 		_, err := mw.Write(analytics.SerializeHeartbeatMessage(toSend))
 		if err != nil {
@@ -494,14 +487,6 @@ func (nm *NodeWatcherImpl) handleHBMessage(hbBytes []byte, mw io.Writer) errors.
 func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte, udpConn *net.UDPConn, rAddr *net.UDPAddr) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
 	//nm.logger.Infof("handling hb message:%+v", hb)
-	if hb.IsTest {
-		//nm.logger.Infof("handling hb test message, sending it to %s", rAddr.String())
-		_, err := udpConn.WriteTo(analytics.SerializeHeartbeatMessage(hb), rAddr)
-		if err != nil {
-			nm.logger.Error(err)
-		}
-		return nil
-	}
 	if hb.IsReply {
 		//nm.logger.Infof("handling hb reply message")
 		nm.registerHBReply(hb)
@@ -514,7 +499,6 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte, udpConn *net.UDPCo
 			Sender:     nm.selfPeer,
 			IsReply:    true,
 			ForceReply: false,
-			IsTest:     false,
 		}
 
 		_, err := udpConn.WriteTo(analytics.SerializeHeartbeatMessage(toSend), rAddr)

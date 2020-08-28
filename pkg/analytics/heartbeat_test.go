@@ -10,17 +10,12 @@ import (
 var testPeer = peer.NewPeer(net.IPv4(0, 0, 0, 0), 1000, 2000)
 
 func Test_serializeHeartbeatMessage(t *testing.T) {
-	test := NewTestHBMessage(testPeer)
+	test := NewHBMessageForceReply(testPeer)
 	bytes := SerializeHeartbeatMessage(test)
 	test2 := DeserializeHeartbeatMessage(bytes)
 
 	if !test.Sender.Equals(test2.Sender) {
 		t.Error("Sender does not match")
-		t.Fail()
-	}
-
-	if test.IsTest != test2.IsTest {
-		t.Error("isTest does not match")
 		t.Fail()
 	}
 }
@@ -37,11 +32,6 @@ func Test_serializeHeartbeatMessage2(t *testing.T) {
 
 	if !test.Sender.Equals(test2.Sender) {
 		t.Error("Sender does not match")
-		t.FailNow()
-	}
-
-	if test.IsTest != test2.IsTest {
-		t.Error("isTest does not match")
 		t.FailNow()
 	}
 
