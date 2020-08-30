@@ -77,7 +77,7 @@ func DeserializePeerArray(buf []byte) (int, []Peer) {
 	peers := make([]Peer, nrPeers)
 	bufPos := 4
 	for i := 0; i < nrPeers; i++ {
-		read, peer := DeserializePeer(buf[:bufPos])
+		read, peer := DeserializePeer(buf[bufPos:])
 		peers[i] = peer
 		bufPos += read
 	}
