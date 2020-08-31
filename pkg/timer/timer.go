@@ -1,8 +1,10 @@
 package timer
 
+import "time"
+
 type ID = uint16
 
 type Timer interface {
 	ID() ID
-	Wait()
+	Deadline() time.Time
 }

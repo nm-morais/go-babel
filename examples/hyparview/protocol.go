@@ -75,7 +75,7 @@ func (h *Hyparview) Init() {
 
 func (h *Hyparview) Start() {
 	h.timeStart = time.Now()
-	pkg.RegisterTimer(h.ID(), ShuffleTimer{timer: time.NewTimer(3 * time.Second)})
+	pkg.RegisterTimer(h.ID(), ShuffleTimer{deadline: time.Now().Add(3 * time.Second)})
 	if h.contactNode.Equals(pkg.SelfPeer()) {
 		return
 	}
@@ -323,7 +323,9 @@ func (h *Hyparview) HandleShuffleReplyMessage(sender peer.Peer, m message.Messag
 
 func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 	//h.logger.Info("Shuffle timer trigger")
-	pkg.RegisterTimer(h.ID(), ShuffleTimer{timer: time.NewTimer(5 * time.Second)})
+
+	toWait := time.Duration(5000 * rand.Float32())
+	pkg.RegisterTimer(h.ID(), ShuffleTimer{deadline: time.Now().Add(toWait * time.Millisecond)})
 
 	if time.Since(h.timeStart) > joinTime {
 		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !h.contactNode.Equals(pkg.SelfPeer()) {

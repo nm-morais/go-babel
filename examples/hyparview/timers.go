@@ -9,13 +9,13 @@ import (
 const ShuffleTimerID = 2001
 
 type ShuffleTimer struct {
-	timer *time.Timer
+	deadline time.Time
 }
 
 func (ShuffleTimer) ID() timer.ID {
 	return ShuffleTimerID
 }
 
-func (s ShuffleTimer) Wait() {
-	<-s.timer.C
+func (s ShuffleTimer) Deadline() time.Time {
+	return s.deadline
 }

@@ -38,12 +38,10 @@ func main() {
 	}
 
 	config := pkg.ProtocolManagerConfig{
-		LogFolder:             "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
-		HandshakeTimeout:      1 * time.Second,
-		HeartbeatTickDuration: 1 * time.Second,
-		DialTimeout:           1 * time.Second,
-		ConnectionReadTimeout: 5 * time.Second,
-		Peer:                  peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(protosPortVar), uint16(analyticsPortVar)),
+		LogFolder:        "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
+		HandshakeTimeout: 1 * time.Second,
+		DialTimeout:      1 * time.Second,
+		Peer:             peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(protosPortVar), uint16(analyticsPortVar)),
 	}
 
 	pkg.InitProtoManager(config)

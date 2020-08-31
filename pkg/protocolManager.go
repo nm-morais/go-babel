@@ -45,20 +45,16 @@ type IProtocolManager interface {
 */
 
 type ProtocolManagerConfig struct {
-	LogFolder             string
-	HandshakeTimeout      time.Duration
-	HeartbeatTickDuration time.Duration
-	ConnectionReadTimeout time.Duration
-	DialTimeout           time.Duration
-	Peer                  peer.Peer
+	LogFolder        string
+	HandshakeTimeout time.Duration
+	DialTimeout      time.Duration
+	Peer             peer.Peer
 }
 
 type protocolValueType = internalProto.WrapperProtocol
 
-var hbProtoInternalID = protocol.ID(1)
-var reservedProtos = []protocol.ID{hbProtoInternalID}
-
 type ProtoManager struct {
+	tq                      TimerQueue
 	nodeWatcher             NodeWatcher
 	config                  ProtocolManagerConfig
 	notificationHub         notificationHub.NotificationHub
@@ -87,6 +83,7 @@ func InitProtoManager(configs ProtocolManagerConfig) ProtoManager {
 		channelSubscribers:      make(map[string]map[protocol.ID]bool),
 		channelSubscribersMutex: &sync.Mutex{},
 		logger:                  logs.NewLogger(ProtoManagerCaller),
+		tq:                      NewTimerQueue(),
 	}
 	return p
 }
@@ -97,11 +94,6 @@ func RegisterListener(listener stream.Stream) {
 
 func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 	_, ok := p.protocols.Load(protocol.ID())
-	for _, protoID := range reservedProtos {
-		if protocol.ID() == protoID {
-			p.logger.Panicf("Trying to add protocol with invalid ID (reserved by internal mechanisms). Reserved protos: %+v", reservedProtos)
-		}
-	}
 
 	if ok {
 		p.logger.Panicf("Protocol %d already registered", protocol.ID())
@@ -195,18 +187,6 @@ func SendRequest(request request.Request, origin protocol.ID, destination protoc
 
 func SendNotification(notification notification.Notification) errors.Error {
 	p.notificationHub.AddNotification(notification)
-	return nil
-}
-
-func RegisterTimer(origin protocol.ID, timer timer.Timer) errors.Error {
-	callerProto, ok := p.protocols.Load(origin)
-	if !ok {
-		p.logger.Panicf("Protocol %d not registered", origin)
-	}
-	go func() { // TODO can be improved to use single routine instead of routine per channel
-		timer.Wait()
-		callerProto.(protocolValueType).DeliverTimer(timer)
-	}()
 	return nil
 }
 
@@ -365,6 +345,7 @@ func setupLoggers() {
 	}
 	pmMw := io.MultiWriter(all, protoManagerFile)
 	p.logger.SetOutput(pmMw)
+
 	streamManagerFile, err := os.Create(logFolder + "streamManager.log")
 	if err != nil {
 		log.Panic(err)
@@ -372,6 +353,14 @@ func setupLoggers() {
 	streamManagerLogger := p.streamManager.Logger()
 	smMw := io.MultiWriter(all, streamManagerFile)
 	streamManagerLogger.SetOutput(smMw)
+
+	timerQueueFile, err := os.Create(logFolder + "timerQueue.log")
+	if err != nil {
+		log.Panic(err)
+	}
+	timerQueueLogger := p.tq.Logger()
+	tqMw := io.MultiWriter(all, timerQueueFile)
+	timerQueueLogger.SetOutput(tqMw)
 
 	if p.nodeWatcher != nil {
 		nodeWatcherLogger := p.nodeWatcher.Logger()
@@ -383,6 +372,14 @@ func setupLoggers() {
 		nmMw := io.MultiWriter(all, nodeWatcherFile)
 		nodeWatcherLogger.SetOutput(nmMw)
 	}
+}
+
+func CancelTimer(timerID int) errors.Error {
+	return p.tq.CancelTimer(timerID)
+}
+
+func RegisterTimer(origin protocol.ID, timer timer.Timer) int {
+	return p.tq.AddTimer(timer, origin)
 }
 
 func Start() {

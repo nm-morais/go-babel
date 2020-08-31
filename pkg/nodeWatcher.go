@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"container/heap"
 	"io"
 	"math/rand"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nm-morais/go-babel/internal/dataStructures"
 	"github.com/nm-morais/go-babel/internal/messageIO"
 	"github.com/nm-morais/go-babel/pkg/analytics"
 	"github.com/nm-morais/go-babel/pkg/errors"
@@ -55,7 +57,7 @@ type NodeWatcherImpl struct {
 	watching     map[string]NodeInfo
 	watchingLock *sync.RWMutex
 
-	conditions     analytics.PriorityQueue
+	conditions     dataStructures.PriorityQueue
 	conditionsLock *sync.RWMutex
 	reEvalNextCond chan *struct{}
 
@@ -83,6 +85,7 @@ type NodeWatcher interface {
 	GetNodeInfo(peer peer.Peer) (*NodeInfo, errors.Error)
 	GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (*NodeInfo, errors.Error)
 	NotifyOnCondition(c Condition) (int, errors.Error)
+	CancelCond(condID int) errors.Error
 	Logger() *logrus.Logger
 }
 
@@ -97,7 +100,7 @@ func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
 		dialing:     make(map[string]bool),
 		dialingLock: &sync.RWMutex{},
 
-		conditions:     make(analytics.PriorityQueue, 0),
+		conditions:     make(dataStructures.PriorityQueue, 0),
 		conditionsLock: &sync.RWMutex{},
 		reEvalNextCond: make(chan *struct{}),
 
@@ -252,12 +255,12 @@ func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time
 func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
 	nm.conditionsLock.Lock()
 	condId := rand.Int()
-	pqItem := &analytics.Item{
+	pqItem := &dataStructures.Item{
 		Value:    c,
 		Priority: time.Now().Add(c.EvalConditionTickDuration).UnixNano(),
 		Key:      condId,
 	}
-	nm.conditions.Push(pqItem)
+	heap.Push(&nm.conditions, pqItem)
 	if pqItem.Index == 0 {
 		nm.reEvalNextCond <- nil
 	}
@@ -267,10 +270,10 @@ func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
 
 func (nm *NodeWatcherImpl) evalCondsPeriodic() errors.Error {
 	for {
-		var nextItem *analytics.Item
+		var nextItem *dataStructures.Item
 		nm.conditionsLock.Lock()
 		if nm.conditions.Len() > 0 {
-			nextItem = nm.conditions.Pop().(*analytics.Item)
+			nextItem = heap.Pop(&nm.conditions).(*dataStructures.Item)
 		}
 		nm.conditionsLock.Unlock()
 
@@ -282,7 +285,7 @@ func (nm *NodeWatcherImpl) evalCondsPeriodic() errors.Error {
 		select {
 		case <-nm.reEvalNextCond:
 			nm.conditionsLock.Lock()
-			nm.conditions.Push(nextItem)
+			heap.Push(&nm.conditions, nextItem)
 			nm.conditionsLock.Unlock()
 			continue
 		case <-time.After(time.Until(time.Unix(0, nextItem.Priority))):
@@ -301,6 +304,10 @@ func (nm *NodeWatcherImpl) evalCondsPeriodic() errors.Error {
 			}
 		}
 	}
+}
+
+func (nm *NodeWatcherImpl) CancelCond(condID int) errors.Error {
+	panic("not yet implemented")
 }
 
 func (nm *NodeWatcherImpl) Logger() *logrus.Logger {
