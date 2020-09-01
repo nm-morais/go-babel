@@ -53,25 +53,6 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
-func (pq *PriorityQueue) Remove(toRemove int) *Item {
-	old := *pq
-	var removed *Item
-	var idx int = -1
-	for i := 0; i < len(old); i++ {
-		n := old[i]
-		if n.Key == toRemove {
-			old[i], old[len(old)-1] = old[len(old)-1], old[i]
-			pq = &old
-			removed = n
-		}
-		idx = i
-	}
-	if idx != -1 {
-		heap.Init(pq)
-	}
-	return removed
-}
-
 // update modifies the priority and value of an Item in the queue.
 func (pq *PriorityQueue) Update(item *Item, value interface{}, priority int64) {
 	item.Value = value

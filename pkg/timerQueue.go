@@ -66,11 +66,14 @@ func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) in
 
 func (tq *timerQueueImpl) removeItem(timerID int) int {
 	tq.logger.Infof("Canceling timer with ID %d", timerID)
-	removed := tq.pq.Remove(timerID)
-	if removed == nil {
-		return -1
+
+	for idx, entry := range tq.pq {
+		if entry.Key == timerID {
+			heap.Remove(&tq.pq, idx)
+			return entry.Key
+		}
 	}
-	return removed.Key
+	return -1
 }
 
 func (tq *timerQueueImpl) CancelTimer(timerID int) errors.Error {
