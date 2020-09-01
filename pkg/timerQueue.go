@@ -109,12 +109,19 @@ func (tq *timerQueueImpl) start() {
 		select {
 		case req := <-tq.cancelTimerChan:
 			tq.logger.Infof("Received cancel timer signal...")
-			req.removed <- tq.removeItem(req.key)
 			if req.key == nextItem.Key {
 				currTimer.Stop()
-				tq.logger.Infof("Canceled timer")
+				req.removed <- req.key
+				tq.logger.Infof("Removed timer %d successfully", req.key)
+				continue
 			}
-			tq.logger.Infof("Removed timer %d", req.key)
+			aux := tq.removeItem(req.key)
+			req.removed <- tq.removeItem(req.key)
+			if aux == -1 {
+				tq.logger.Infof("Removed timer %d successfully", req.key)
+			} else {
+				tq.logger.Warnf("Removing timer %d failure: not found", req.key)
+			}
 		case newItem := <-tq.addTimerChan:
 			tq.logger.Infof("Received add timer signal...")
 			if nextItem != nil {
