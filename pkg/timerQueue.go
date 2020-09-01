@@ -34,7 +34,7 @@ type TimerQueue interface {
 }
 
 type timerQueueImpl struct {
-	pq              dataStructures.PriorityQueue
+	pq              *dataStructures.PriorityQueue
 	addTimerChan    chan *dataStructures.Item
 	cancelTimerChan chan *cancelTimerReq
 	logger          *logrus.Logger
@@ -90,12 +90,47 @@ func (tq *timerQueueImpl) Logger() *logrus.Logger {
 
 func (tq *timerQueueImpl) start() {
 
+LOOP:
 	for {
 		var nextItem *dataStructures.Item
 		var waitTime time.Duration
 		var currTimer = time.NewTimer(math.MaxInt64)
 
+		if tq.pq.Len() > 0 {
+			nextItem = heap.Pop(tq.pq).(*dataStructures.Item)
+			value := nextItem.Value.(*pqItemValue)
+			waitTime = time.Until(value.timer.Deadline())
+			currTimer = time.NewTimer(waitTime)
+			tq.logger.Infof("Waiting %s for timer of type %s with id %d", waitTime, reflect.TypeOf(value.timer), nextItem.Key)
+		}
+
 		select {
+		case req := <-tq.cancelTimerChan:
+			tq.logger.Infof("Received cancel timer signal...")
+			if req.key == nextItem.Key {
+				req.removed <- req.key
+				tq.logger.Infof("Removed timer %d successfully", req.key)
+				continue LOOP
+			}
+			aux := tq.removeItem(req.key)
+			req.removed <- tq.removeItem(req.key)
+			if aux == -1 {
+				tq.logger.Infof("Removed timer %d successfully", req.key)
+			} else {
+				tq.logger.Warnf("Removing timer %d failure: not found", req.key)
+			}
+			tq.pq.LogEntries(tq.logger)
+		case newItem := <-tq.addTimerChan:
+			tq.logger.Infof("Received add timer signal...")
+
+			tq.logger.Infof("Adding timer %d", newItem.Key)
+			heap.Push(tq.pq, newItem)
+
+			if nextItem != nil {
+				tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", newItem.Key)
+				heap.Push(tq.pq, nextItem)
+			}
+			tq.pq.LogEntries(tq.logger)
 		case <-currTimer.C:
 			tq.logger.Info()
 			tq.logger.Infof("----------------------Processing %+v------------------", *nextItem)
@@ -103,46 +138,7 @@ func (tq *timerQueueImpl) start() {
 			if proto, ok := p.protocols.Load(value.protoID); ok {
 				proto.(protocolValueType).DeliverTimer(value.timer)
 			}
-		default:
-			if tq.pq.Len() > 0 {
-				// tq.pq.LogEntries(tq.logger)
-				nextItem = heap.Pop(&tq.pq).(*dataStructures.Item)
-				value := nextItem.Value.(*pqItemValue)
-				waitTime = time.Until(value.timer.Deadline())
-				currTimer = time.NewTimer(waitTime)
-				tq.logger.Infof("Waiting %s for timer of type %s with id %d", waitTime, reflect.TypeOf(value.timer), nextItem.Key)
-			}
-			select {
-			case req := <-tq.cancelTimerChan:
-				tq.logger.Infof("Received cancel timer signal...")
-				if req.key == nextItem.Key {
-					currTimer.Stop()
-					req.removed <- req.key
-					tq.logger.Infof("Removed timer %d successfully", req.key)
-					continue
-				}
-				aux := tq.removeItem(req.key)
-				req.removed <- tq.removeItem(req.key)
-				if aux == -1 {
-					tq.logger.Infof("Removed timer %d successfully", req.key)
-				} else {
-					tq.logger.Warnf("Removing timer %d failure: not found", req.key)
-				}
-			case newItem := <-tq.addTimerChan:
-				tq.logger.Infof("Received add timer signal...")
-				if nextItem != nil {
-					heap.Push(&tq.pq, nextItem)
-				}
-				tq.logger.Infof("Added timer %d", newItem.Key)
-				heap.Push(&tq.pq, newItem)
-			case <-currTimer.C:
-				tq.logger.Info()
-				tq.logger.Infof("----------------------Processing %+v------------------", *nextItem)
-				value := nextItem.Value.(*pqItemValue)
-				if proto, ok := p.protocols.Load(value.protoID); ok {
-					proto.(protocolValueType).DeliverTimer(value.timer)
-				}
-			}
+			tq.pq.LogEntries(tq.logger)
 		}
 	}
 }
