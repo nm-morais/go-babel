@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nm-morais/go-babel/internal/dataStructures"
 	"github.com/nm-morais/go-babel/internal/messageIO"
 	"github.com/nm-morais/go-babel/pkg/analytics"
+	"github.com/nm-morais/go-babel/pkg/dataStructures"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/notification"
