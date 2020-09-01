@@ -34,7 +34,7 @@ type TimerQueue interface {
 }
 
 type timerQueueImpl struct {
-	pq              *dataStructures.PriorityQueue
+	pq              dataStructures.PriorityQueue
 	addTimerChan    chan *dataStructures.Item
 	cancelTimerChan chan *cancelTimerReq
 	logger          *logrus.Logger
@@ -97,7 +97,7 @@ LOOP:
 		var currTimer = time.NewTimer(math.MaxInt64)
 
 		if tq.pq.Len() > 0 {
-			nextItem = heap.Pop(tq.pq).(*dataStructures.Item)
+			nextItem = heap.Pop(&tq.pq).(*dataStructures.Item)
 			value := nextItem.Value.(*pqItemValue)
 			waitTime = time.Until(value.timer.Deadline())
 			currTimer = time.NewTimer(waitTime)
@@ -124,11 +124,11 @@ LOOP:
 			tq.logger.Infof("Received add timer signal...")
 
 			tq.logger.Infof("Adding timer %d", newItem.Key)
-			heap.Push(tq.pq, newItem)
+			heap.Push(&tq.pq, newItem)
 
 			if nextItem != nil {
 				tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", newItem.Key)
-				heap.Push(tq.pq, nextItem)
+				heap.Push(&tq.pq, nextItem)
 			}
 			tq.pq.LogEntries(tq.logger)
 		case <-currTimer.C:
