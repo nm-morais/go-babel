@@ -115,12 +115,13 @@ LOOP:
 				heap.Push(&tq.pq, nextItem)
 			}
 			aux := tq.removeItem(req.key)
-			req.removed <- tq.removeItem(req.key)
+
 			if aux == -1 {
 				tq.logger.Infof("Removed timer %d successfully", req.key)
 			} else {
 				tq.logger.Warnf("Removing timer %d failure: not found", req.key)
 			}
+			req.removed <- aux
 			tq.pq.LogEntries(tq.logger)
 		case newItem := <-tq.addTimerChan:
 			tq.logger.Infof("Received add timer signal...")
