@@ -93,7 +93,7 @@ func (tq *timerQueueImpl) start() {
 	for {
 		var nextItem *dataStructures.Item
 		var waitTime time.Duration
-		var currTimer *time.Timer
+		var currTimer = time.NewTimer(math.MaxInt64)
 
 		select {
 		case <-currTimer.C:
@@ -111,8 +111,6 @@ func (tq *timerQueueImpl) start() {
 				waitTime = time.Until(value.timer.Deadline())
 				currTimer = time.NewTimer(waitTime)
 				tq.logger.Infof("Waiting %s for timer of type %s with id %d", waitTime, reflect.TypeOf(value.timer), nextItem.Key)
-			} else {
-				currTimer = time.NewTimer(math.MaxInt64)
 			}
 			select {
 			case req := <-tq.cancelTimerChan:
