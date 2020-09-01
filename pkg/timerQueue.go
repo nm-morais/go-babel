@@ -111,6 +111,8 @@ LOOP:
 				req.removed <- req.key
 				tq.logger.Infof("Removed timer %d successfully", req.key)
 				continue LOOP
+			} else {
+				heap.Push(&tq.pq, nextItem)
 			}
 			aux := tq.removeItem(req.key)
 			req.removed <- tq.removeItem(req.key)
