@@ -216,7 +216,6 @@ func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.E
 	}
 	watchedPeer.peerConn.Close()
 	delete(nm.watching, peer.ToString())
-	close(watchedPeer.enoughSamples)
 	nm.watchingLock.Unlock()
 	return nil
 }
