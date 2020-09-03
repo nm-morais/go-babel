@@ -138,8 +138,7 @@ LOOP:
 			}
 			tq.pq.LogEntries(tq.logger)
 		case <-currTimer.C:
-			tq.logger.Info()
-			tq.logger.Infof("----------------------Processing %+v------------------", *nextItem)
+			tq.logger.Infof("Processing timer %+v", *nextItem)
 			value := nextItem.Value.(*pqItemValue)
 			if proto, ok := p.protocols.Load(value.protoID); ok {
 				proto.(protocolValueType).DeliverTimer(value.timer)
