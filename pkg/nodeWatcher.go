@@ -42,6 +42,7 @@ type NodeInfo struct {
 	subscribers   map[protocol.ID]bool
 	peer          peer.Peer
 	peerConn      net.Conn
+	mu            *sync.Mutex
 	enoughSamples chan interface{}
 	LatencyCalc   *analytics.LatencyCalculator
 	Detector      *analytics.Detector
@@ -112,6 +113,7 @@ func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
 }
 
 func (nm *NodeWatcherImpl) Watch(p peer.Peer, protoID protocol.ID) errors.Error {
+	nm.logger.Infof("Proto %d request to watch %s", protoID, p.ToString())
 	nm.watchingLock.Lock()
 	if _, ok := nm.watching[p.ToString()]; ok {
 		nm.watchingLock.Unlock()
@@ -151,6 +153,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, protoID protocol.ID) errors.Error 
 
 		nm.watchingLock.Lock()
 		nm.watching[p.ToString()] = NodeInfo{
+			mu:            &sync.Mutex{},
 			subscribers:   map[protocol.ID]bool{protoID: true},
 			peerConn:      stream,
 			peer:          p,
@@ -161,7 +164,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, protoID protocol.ID) errors.Error 
 			enoughSamples: make(chan interface{}),
 		}
 		nm.watchingLock.Unlock()
-
+		nm.logWatchingNodes()
 		switch stream := stream.(type) {
 		case *net.TCPConn:
 			go nm.handleTCPConnection(stream)
@@ -203,15 +206,18 @@ func (nm *NodeWatcherImpl) startHbRoutine(p peer.Peer) {
 }
 
 func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error {
+	nm.logger.Infof("Proto %d request to unwatch %s", protoID, peer.ToString())
 	nm.watchingLock.Lock()
-	defer nm.watchingLock.Unlock()
 	watchedPeer, ok := nm.watching[peer.ToString()]
-	if ok {
+	if !ok {
+		nm.watchingLock.Unlock()
+		nm.logger.Warn("peer not being tracked")
 		return errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
 	watchedPeer.peerConn.Close()
 	delete(nm.watching, peer.ToString())
 	close(watchedPeer.enoughSamples)
+	nm.watchingLock.Unlock()
 	return nil
 }
 
@@ -530,9 +536,12 @@ func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage) {
 	}
 	nm.watchingLock.RUnlock()
 
+	nodeInfo.mu.Lock()
+	defer nodeInfo.mu.Unlock()
+
 	nodeInfo.Detector.Ping(timeReceived)
 	nodeInfo.LatencyCalc.AddMeasurement(timeTaken)
-	if nodeInfo.Detector.NrSamples() >= nm.conf.MinSamplesFaultDetector && nodeInfo.LatencyCalc.NrMeasurements() >= nm.conf.MinSamplesLatencyEstimate {
+	if nodeInfo.Detector.NrSamples() == nm.conf.MinSamplesFaultDetector && nodeInfo.LatencyCalc.NrMeasurements() == nm.conf.MinSamplesLatencyEstimate {
 		select {
 		case <-nodeInfo.enoughSamples:
 		default:
@@ -542,4 +551,12 @@ func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage) {
 			close(nodeInfo.enoughSamples)
 		}
 	}
+}
+
+func (nm *NodeWatcherImpl) logWatchingNodes() {
+	nm.watchingLock.RLock()
+	for _, p := range nm.watching {
+		nm.logger.Infof("Watching peer %s", p.peer.ToString())
+	}
+	nm.watchingLock.RUnlock()
 }

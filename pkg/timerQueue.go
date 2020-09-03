@@ -119,7 +119,7 @@ LOOP:
 			}
 			aux := tq.removeItem(req.key)
 
-			if aux == -1 {
+			if aux != -1 {
 				tq.logger.Infof("Removed timer %d successfully", req.key)
 			} else {
 				tq.logger.Warnf("Removing timer %d failure: not found", req.key)

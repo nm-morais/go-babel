@@ -368,7 +368,6 @@ func setupLoggers() {
 		if err != nil {
 			log.Panic(err)
 		}
-
 		nmMw := io.MultiWriter(all, nodeWatcherFile)
 		nodeWatcherLogger.SetOutput(nmMw)
 	}
