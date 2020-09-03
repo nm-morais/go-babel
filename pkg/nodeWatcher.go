@@ -52,9 +52,6 @@ type NodeWatcherImpl struct {
 	selfPeer peer.Peer
 	conf     NodeWatcherConf
 
-	dialing     map[string]bool
-	dialingLock *sync.RWMutex
-
 	watching     map[string]NodeInfo
 	watchingLock *sync.RWMutex
 
@@ -82,6 +79,7 @@ type NodeWatcherConf struct {
 
 type NodeWatcher interface {
 	Watch(Peer peer.Peer, protoID protocol.ID) errors.Error
+	WatchWithInitialLatencyValue(p peer.Peer, issuerProto protocol.ID, latency time.Duration) errors.Error
 	Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error
 	GetNodeInfo(peer peer.Peer) (*NodeInfo, errors.Error)
 	GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (*NodeInfo, errors.Error)
@@ -98,9 +96,6 @@ func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
 		watching:     make(map[string]NodeInfo),
 		watchingLock: &sync.RWMutex{},
 
-		dialing:     make(map[string]bool),
-		dialingLock: &sync.RWMutex{},
-
 		conditions:     make(dataStructures.PriorityQueue, 0),
 		conditionsLock: &sync.RWMutex{},
 		reEvalNextCond: make(chan *struct{}),
@@ -112,68 +107,70 @@ func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
 	return nm
 }
 
-func (nm *NodeWatcherImpl) Watch(p peer.Peer, protoID protocol.ID) errors.Error {
-	nm.logger.Infof("Proto %d request to watch %s", protoID, p.ToString())
+func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, p peer.Peer) {
+	stream, err := nm.establishStreamTo(p)
+	if err != nil {
+		return
+	}
+	nm.watchingLock.Lock()
+	curr := nm.watching[p.ToString()]
+	curr.peerConn = stream
+	curr.mr = messageIO.NewMessageReader(stream)
+	curr.mw = messageIO.NewMessageWriter(stream)
+	nm.watching[p.ToString()] = curr
+	nm.watchingLock.Unlock()
+	switch stream := stream.(type) {
+	case *net.TCPConn:
+		go nm.handleTCPConnection(stream)
+	case *net.UDPConn:
+		go nm.handleUDPConnection(stream)
+	}
+	nm.logWatchingNodes()
+	nm.startHbRoutine(p)
+}
+
+func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Error {
+	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.ToString())
 	nm.watchingLock.Lock()
 	if _, ok := nm.watching[p.ToString()]; ok {
 		nm.watchingLock.Unlock()
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
 	nm.watching[p.ToString()] = NodeInfo{
-		subscribers:   map[protocol.ID]bool{protoID: true},
+		nrRetries:     0,
+		closeOnce:     &sync.Once{},
 		peer:          p,
+		LatencyCalc:   analytics.NewLatencyCalculator(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight),
+		Detector:      analytics.NewDetector(nm.conf.WindowSize, nm.conf.MinSamplesFaultDetector),
 		enoughSamples: make(chan interface{}),
 	}
 	nm.watchingLock.Unlock()
-	go func() {
+	go nm.dialAndWatch(issuerProto, p)
+	return nil
+}
 
-		nm.dialingLock.RLock()
-		if nm.dialing[p.ToString()] {
-			nm.dialingLock.RUnlock()
-			return
-		}
-		nm.dialingLock.RUnlock()
-
-		nm.dialingLock.Lock()
-		if nm.dialing[p.ToString()] {
-			nm.dialingLock.Unlock()
-			return
-		}
-		nm.dialing[p.ToString()] = true
-		nm.dialingLock.Unlock()
-
-		//TODO make conn
-		stream, err := nm.establishStreamTo(p)
-		if err != nil {
-			nm.dialingLock.Lock()
-			defer nm.dialingLock.Unlock()
-			delete(nm.dialing, p.ToString())
-			return
-		}
-
-		nm.watchingLock.Lock()
-		nm.watching[p.ToString()] = NodeInfo{
-			nrRetries:     0,
-			closeOnce:     &sync.Once{},
-			subscribers:   map[protocol.ID]bool{protoID: true},
-			peerConn:      stream,
-			peer:          p,
-			LatencyCalc:   analytics.NewLatencyCalculator(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight),
-			Detector:      analytics.NewDetector(nm.conf.WindowSize, nm.conf.MinSamplesFaultDetector),
-			mr:            messageIO.NewMessageReader(stream),
-			mw:            messageIO.NewMessageWriter(stream),
-			enoughSamples: make(chan interface{}),
-		}
+func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto protocol.ID, latency time.Duration) errors.Error {
+	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.ToString(), latency)
+	nm.watchingLock.Lock()
+	if _, ok := nm.watching[p.ToString()]; ok {
 		nm.watchingLock.Unlock()
-		switch stream := stream.(type) {
-		case *net.TCPConn:
-			go nm.handleTCPConnection(stream)
-		case *net.UDPConn:
-			go nm.handleUDPConnection(stream)
-		}
-		nm.logWatchingNodes()
-		nm.startHbRoutine(p)
-	}()
+		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
+	}
+	newNodeInfo := NodeInfo{
+		nrRetries:     0,
+		closeOnce:     &sync.Once{},
+		peer:          p,
+		LatencyCalc:   analytics.NewLatencyCalculatorWithValue(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight, latency),
+		Detector:      analytics.NewDetector(nm.conf.WindowSize, nm.conf.MinSamplesFaultDetector),
+		enoughSamples: make(chan interface{}),
+	}
+	newNodeInfo.LatencyCalc.AddMeasurement(latency)
+	newNodeInfo.closeOnce.Do(func() {
+		nm.closeEnoughSamplesChan(newNodeInfo)
+	})
+	nm.watching[p.ToString()] = newNodeInfo
+	nm.watchingLock.Unlock()
+	go nm.dialAndWatch(issuerProto, p)
 	return nil
 }
 
@@ -537,7 +534,6 @@ func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage) {
 		return
 	}
 	nm.watchingLock.RUnlock()
-
 	nodeInfo.Detector.Ping(timeReceived)
 	nodeInfo.LatencyCalc.AddMeasurement(timeTaken)
 	if nodeInfo.Detector.NrSamples() >= nm.conf.MinSamplesFaultDetector && nodeInfo.LatencyCalc.NrMeasurements() >= nm.conf.MinSamplesLatencyEstimate {
