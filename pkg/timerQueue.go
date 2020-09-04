@@ -133,7 +133,7 @@ LOOP:
 			heap.Push(&tq.pq, newItem)
 
 			if nextItem != nil {
-				tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", newItem.Key)
+				tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", nextItem.Key)
 				heap.Push(&tq.pq, nextItem)
 			}
 			tq.pq.LogEntries(tq.logger)

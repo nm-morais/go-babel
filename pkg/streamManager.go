@@ -371,10 +371,6 @@ func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Str
 		//sm.logger.Infof("Read %d bytes from %s", n, newPeer.ToString())
 		deserialized := deserializer.Deserialize(msgBuf[:n])
 		protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
-		if protoMsg.MessageID == internalMsg.HeartbeatMessageType {
-			continue
-		}
-
 		for _, toNotifyID := range protoMsg.DestProtos {
 			if toNotify, ok := p.protocols.Load(toNotifyID); ok {
 				appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
