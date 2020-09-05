@@ -496,5 +496,4 @@ func (sm streamManager) logStreamManagerState() {
 		sm.logger.Warn("Inbound connections and outboundConnections are mismatched")
 	}
 	sm.logger.Info("--------------------------------------------------")
-
 }

@@ -3,6 +3,7 @@ package pkg
 import (
 	"container/heap"
 	"io"
+	"math"
 	"math/rand"
 	"net"
 	"reflect"
@@ -49,6 +50,11 @@ type NodeInfo struct {
 	Detector         *analytics.Detector
 }
 
+type cancelCondReq struct {
+	key     int
+	removed chan int
+}
+
 type NodeWatcherImpl struct {
 	selfPeer peer.Peer
 	conf     NodeWatcherConf
@@ -57,8 +63,8 @@ type NodeWatcherImpl struct {
 	watchingLock *sync.RWMutex
 
 	conditions     dataStructures.PriorityQueue
-	conditionsLock *sync.RWMutex
-	reEvalNextCond chan *struct{}
+	addCondChan    chan *dataStructures.Item
+	cancelCondChan chan *cancelCondReq
 
 	logger *logrus.Logger
 }
@@ -98,9 +104,7 @@ func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
 		watching:     make(map[string]NodeInfo),
 		watchingLock: &sync.RWMutex{},
 
-		conditions:     make(dataStructures.PriorityQueue, 0),
-		conditionsLock: &sync.RWMutex{},
-		reEvalNextCond: make(chan *struct{}),
+		conditions: make(dataStructures.PriorityQueue, 0),
 
 		logger: logs.NewLogger(nodeWatcherCaller),
 	}
@@ -264,64 +268,6 @@ func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time
 	case <-time.After(time.Until(deadline)):
 		return nil, errors.NonFatalError(404, "timed out waiting for enough samples", nodeWatcherCaller)
 	}
-}
-
-func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
-	nm.conditionsLock.Lock()
-	condId := rand.Int()
-	pqItem := &dataStructures.Item{
-		Value:    c,
-		Priority: time.Now().Add(c.EvalConditionTickDuration).UnixNano(),
-		Key:      condId,
-	}
-	heap.Push(&nm.conditions, pqItem)
-	if pqItem.Index == 0 {
-		nm.reEvalNextCond <- nil
-	}
-	nm.conditionsLock.Unlock()
-	return condId, nil
-}
-
-func (nm *NodeWatcherImpl) evalCondsPeriodic() errors.Error {
-	for {
-		var nextItem *dataStructures.Item
-		nm.conditionsLock.Lock()
-		if nm.conditions.Len() > 0 {
-			nextItem = heap.Pop(&nm.conditions).(*dataStructures.Item)
-		}
-		nm.conditionsLock.Unlock()
-
-		if nextItem == nil {
-			<-nm.reEvalNextCond
-			continue
-		}
-		cond := nextItem.Value.(Condition)
-		select {
-		case <-nm.reEvalNextCond:
-			nm.conditionsLock.Lock()
-			heap.Push(&nm.conditions, nextItem)
-			nm.conditionsLock.Unlock()
-			continue
-		case <-time.After(time.Until(time.Unix(0, nextItem.Priority))):
-			nm.watchingLock.Lock()
-			nodeStats := nm.watching[cond.Peer.ToString()]
-			nm.watchingLock.Unlock()
-			if cond.CondFunc(nodeStats) {
-				SendNotification(cond.Notification)
-				if cond.Repeatable {
-					if cond.EnableGracePeriod {
-						nm.conditions.Update(nextItem, cond, time.Now().Add(cond.GracePeriod).UnixNano())
-						continue
-					}
-					nm.conditions.Update(nextItem, cond, time.Now().Add(cond.EvalConditionTickDuration).UnixNano())
-				}
-			}
-		}
-	}
-}
-
-func (nm *NodeWatcherImpl) CancelCond(condID int) errors.Error {
-	panic("not yet implemented")
 }
 
 func (nm *NodeWatcherImpl) Logger() *logrus.Logger {
@@ -607,4 +553,97 @@ func (nm *NodeWatcherImpl) logWatchingNodes() {
 		nm.logger.Infof("%s", p.peer.ToString())
 	}
 	nm.watchingLock.RUnlock()
+}
+
+func (nm *NodeWatcherImpl) CancelCond(condID int) errors.Error {
+	responseChan := make(chan int)
+	defer close(responseChan)
+	nm.cancelCondChan <- &cancelCondReq{key: condID, removed: responseChan}
+	response := <-responseChan
+	if response == -1 {
+		return errors.NonFatalError(404, "condition not found", nodeWatcherCaller)
+	}
+	return nil
+}
+
+func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
+	condId := rand.Int()
+	conditionsItem := &dataStructures.Item{
+		Value:    c,
+		Key:      condId,
+		Priority: time.Now().Add(c.EvalConditionTickDuration).Unix(),
+	}
+	nm.addCondChan <- conditionsItem
+	return condId, nil
+}
+
+func (nm *NodeWatcherImpl) evalCondsPeriodic() {
+	var waitTime time.Duration
+	var nextItem *dataStructures.Item
+
+LOOP:
+	for {
+		var nextItemTimer = time.NewTimer(math.MaxInt64)
+		if nm.conditions.Len() > 0 {
+			nextItem = heap.Pop(&nm.conditions).(*dataStructures.Item)
+			waitTime = time.Until(time.Unix(0, nextItem.Priority))
+			nextItemTimer = time.NewTimer(waitTime)
+		}
+		select {
+		case newItem := <-nm.addCondChan:
+			nm.logger.Infof("Received add condition signal...")
+
+			nm.logger.Infof("Adding condition %d", newItem.Key)
+			heap.Push(&nm.conditions, newItem)
+
+			if nextItem != nil {
+				nm.logger.Infof("nextItem (%d) was not nil, re-adding to condition list", nextItem.Key)
+				heap.Push(&nm.conditions, nextItem)
+			}
+			nm.conditions.LogEntries(nm.logger)
+		case req := <-nm.cancelCondChan:
+			nm.logger.Infof("Received cancel cond signal...")
+			if req.key == nextItem.Key {
+				req.removed <- req.key
+				nm.logger.Infof("Removed condition %d successfully", req.key)
+				continue LOOP
+			}
+
+			heap.Push(&nm.conditions, nextItem)
+			aux := nm.removeCond(req.key)
+			if aux != -1 {
+				nm.logger.Infof("Removed condition %d successfully", req.key)
+			} else {
+				nm.logger.Warnf("Removing condition %d failure: not found", req.key)
+			}
+			req.removed <- aux
+			nm.conditions.LogEntries(nm.logger)
+		case <-nextItemTimer.C:
+			nm.logger.Infof("Processing condition %+v", *nextItem)
+			cond := nextItem.Value.(Condition)
+			nodeStats := nm.watching[cond.Peer.ToString()]
+			if cond.CondFunc(nodeStats) {
+				SendNotification(cond.Notification)
+				if cond.Repeatable {
+					if cond.EnableGracePeriod {
+						nm.conditions.Update(nextItem, cond, time.Now().Add(cond.GracePeriod).UnixNano())
+						continue
+					}
+					nm.conditions.Update(nextItem, cond, time.Now().Add(cond.EvalConditionTickDuration).UnixNano())
+				}
+			}
+			nm.conditions.LogEntries(nm.logger)
+		}
+	}
+}
+
+func (nm *NodeWatcherImpl) removeCond(condId int) int {
+	nm.logger.Infof("Canceling timer with ID %d", condId)
+	for idx, entry := range nm.conditions {
+		if entry.Key == condId {
+			heap.Remove(&nm.conditions, idx)
+			return entry.Key
+		}
+	}
+	return -1
 }
