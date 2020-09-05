@@ -401,7 +401,7 @@ func (sm streamManager) waitDial(dialerProto protocol.ID, toDial peer.Peer, wait
 }
 
 func (sm streamManager) handleOutboundTransportFailure(remotePeer peer.Peer) errors.Error {
-	sm.dialingTransportsMutex.Lock() //TODO think about this, should we close inbound conn on outbound close
+	sm.dialingTransportsMutex.Lock()
 	outConn, ok := sm.outboundTransports.Load(remotePeer.ToString())
 	if ok {
 		outConn.(outboundStreamValueType).outboundTransport.Close()

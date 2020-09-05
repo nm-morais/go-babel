@@ -98,15 +98,12 @@ type NodeWatcher interface {
 
 func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
 	nm := &NodeWatcherImpl{
-		conf:     config,
-		selfPeer: selfPeer,
-
+		conf:         config,
+		selfPeer:     selfPeer,
 		watching:     make(map[string]NodeInfo),
 		watchingLock: &sync.RWMutex{},
-
-		conditions: make(dataStructures.PriorityQueue, 0),
-
-		logger: logs.NewLogger(nodeWatcherCaller),
+		conditions:   make(dataStructures.PriorityQueue, 0),
+		logger:       logs.NewLogger(nodeWatcherCaller),
 	}
 
 	if nm.conf.OldLatencyWeight+nm.conf.NewLatencyWeight != 1 {
@@ -621,7 +618,9 @@ LOOP:
 		case <-nextItemTimer.C:
 			nm.logger.Infof("Processing condition %+v", *nextItem)
 			cond := nextItem.Value.(Condition)
+			nm.watchingLock.RLock()
 			nodeStats := nm.watching[cond.Peer.ToString()]
+			nm.watchingLock.RUnlock()
 			if cond.CondFunc(nodeStats) {
 				SendNotification(cond.Notification)
 				if cond.Repeatable {
