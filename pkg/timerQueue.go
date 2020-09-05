@@ -72,6 +72,7 @@ func (tq *timerQueueImpl) removeItem(timerID int) int {
 			return entry.Key
 		}
 	}
+	heap.Init(&tq.pq)
 	return -1
 }
 

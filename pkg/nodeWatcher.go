@@ -625,10 +625,12 @@ LOOP:
 				SendNotification(cond.Notification)
 				if cond.Repeatable {
 					if cond.EnableGracePeriod {
-						nm.conditions.Update(nextItem, cond, time.Now().Add(cond.GracePeriod).UnixNano())
+						nextItem.Priority = time.Now().Add(cond.GracePeriod).UnixNano()
+						heap.Push(&nm.conditions, nextItem)
 						continue
 					}
-					nm.conditions.Update(nextItem, cond, time.Now().Add(cond.EvalConditionTickDuration).UnixNano())
+					nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
+					heap.Push(&nm.conditions, nextItem)
 				}
 			}
 			nm.conditions.LogEntries(nm.logger)
@@ -644,5 +646,6 @@ func (nm *NodeWatcherImpl) removeCond(condId int) int {
 			return entry.Key
 		}
 	}
+	heap.Init(&nm.conditions)
 	return -1
 }
