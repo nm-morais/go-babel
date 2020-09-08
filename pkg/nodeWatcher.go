@@ -597,7 +597,7 @@ LOOP:
 				nm.logger.Infof("nextItem (%d) was not nil, re-adding to condition list", nextItem.Key)
 				heap.Push(&nm.conditions, nextItem)
 			}
-			nm.conditions.LogEntries(nm.logger)
+			//nm.conditions.LogEntries(nm.logger)
 		case req := <-nm.cancelCondChan:
 			nm.logger.Infof("Received cancel cond signal...")
 			if req.key == nextItem.Key {
@@ -614,7 +614,7 @@ LOOP:
 				nm.logger.Warnf("Removing condition %d failure: not found", req.key)
 			}
 			req.removed <- aux
-			nm.conditions.LogEntries(nm.logger)
+			//nm.conditions.LogEntries(nm.logger)
 		case <-nextItemTimer.C:
 			nm.logger.Infof("Processing condition %+v", *nextItem)
 			cond := nextItem.Value.(Condition)
@@ -633,7 +633,7 @@ LOOP:
 					heap.Push(&nm.conditions, nextItem)
 				}
 			}
-			nm.conditions.LogEntries(nm.logger)
+			//nm.conditions.LogEntries(nm.logger)
 		}
 	}
 }

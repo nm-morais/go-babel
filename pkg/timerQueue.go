@@ -125,7 +125,7 @@ LOOP:
 				tq.logger.Warnf("Removing timer %d failure: not found", req.key)
 			}
 			req.removed <- aux
-			tq.pq.LogEntries(tq.logger)
+			//tq.pq.LogEntries(tq.logger)
 		case newItem := <-tq.addTimerChan:
 			tq.logger.Infof("Received add timer signal...")
 
@@ -136,14 +136,14 @@ LOOP:
 				tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", nextItem.Key)
 				heap.Push(&tq.pq, nextItem)
 			}
-			tq.pq.LogEntries(tq.logger)
+			//tq.pq.LogEntries(tq.logger)
 		case <-currTimer.C:
 			tq.logger.Infof("Processing timer %+v", *nextItem)
 			value := nextItem.Value.(*pqItemValue)
 			if proto, ok := p.protocols.Load(value.protoID); ok {
 				proto.(protocolValueType).DeliverTimer(value.timer)
 			}
-			tq.pq.LogEntries(tq.logger)
+			//tq.pq.LogEntries(tq.logger)
 		}
 	}
 }
