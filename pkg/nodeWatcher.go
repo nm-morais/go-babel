@@ -138,6 +138,9 @@ func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, p peer.Peer) {
 }
 
 func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Error {
+	if p == nil {
+		panic("Tried to watch nil peer")
+	}
 	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.ToString())
 	nm.watchingLock.Lock()
 	if _, ok := nm.watching[p.ToString()]; ok {
@@ -160,6 +163,9 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 
 func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto protocol.ID, latency time.Duration) errors.Error {
 	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.ToString(), latency)
+	if p == nil {
+		panic("Tried to watch nil peer")
+	}
 	nm.watchingLock.Lock()
 	if _, ok := nm.watching[p.ToString()]; ok {
 		nm.watchingLock.Unlock()
@@ -621,19 +627,25 @@ LOOP:
 			nm.watchingLock.RLock()
 			nodeStats := nm.watching[cond.Peer.ToString()]
 			nm.watchingLock.RUnlock()
-			if cond.CondFunc(nodeStats) {
-				SendNotification(cond.Notification)
-				if cond.Repeatable {
-					if cond.EnableGracePeriod {
-						nextItem.Priority = time.Now().Add(cond.GracePeriod).UnixNano()
+			select {
+			case <-nodeStats.enoughSamples:
+				if cond.CondFunc(nodeStats) {
+					SendNotification(cond.Notification)
+					if cond.Repeatable {
+						if cond.EnableGracePeriod {
+							nextItem.Priority = time.Now().Add(cond.GracePeriod).UnixNano()
+							heap.Push(&nm.conditions, nextItem)
+							continue
+						}
+						nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
 						heap.Push(&nm.conditions, nextItem)
-						continue
 					}
-					nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
-					heap.Push(&nm.conditions, nextItem)
 				}
+				//nm.conditions.LogEntries(nm.logger)
+			default:
+				nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
+				heap.Push(&nm.conditions, nextItem)
 			}
-			//nm.conditions.LogEntries(nm.logger)
 		}
 	}
 }

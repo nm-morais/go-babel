@@ -148,6 +148,12 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 
 func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) {
 	proto, ok := p.protocols.Load(origin)
+	defer func() {
+		if r := recover(); r != nil {
+			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller))
+		}
+	}()
+
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
 	}

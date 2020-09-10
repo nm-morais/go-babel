@@ -296,7 +296,7 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	sm.outboundTransports.Store(toDial.ToString(), newOutboundConn)
 
 	if !dialSuccess(dialingProto, handshakeMsg.Protos, toDial) {
-		sm.logger.Panicln("No protocol accepted conn")
+		sm.logger.Panicf("No protocol accepted conn")
 		stream.Close()
 		sm.hbChannels.Delete(toDial.ToString())
 		sm.outboundTransports.Delete(toDial.ToString())
