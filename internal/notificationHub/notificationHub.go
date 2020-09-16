@@ -28,6 +28,7 @@ func NewNotificationHub() NotificationHub {
 
 func (hub *notificationHub) RemoveListener(id notification.ID, protoID protocol.ID) {
 	hub.listenersMutex.Lock()
+	defer hub.listenersMutex.Unlock()
 	currListeners, ok := hub.listeners[id]
 	if !ok {
 		return
@@ -41,11 +42,11 @@ func (hub *notificationHub) RemoveListener(id notification.ID, protoID protocol.
 	if len(hub.listeners[id]) == 0 {
 		delete(hub.listeners, id)
 	}
-	hub.listenersMutex.Unlock()
 }
 
 func (hub *notificationHub) AddListener(id notification.ID, wrapperProtocol internalProto.WrapperProtocol) {
 	hub.listenersMutex.Lock()
+	defer hub.listenersMutex.Unlock()
 	currListeners, ok := hub.listeners[id]
 	if !ok {
 		hub.listeners[id] = []internalProto.WrapperProtocol{wrapperProtocol}
@@ -53,11 +54,12 @@ func (hub *notificationHub) AddListener(id notification.ID, wrapperProtocol inte
 	}
 	currListeners = append(currListeners, wrapperProtocol)
 	hub.listeners[id] = currListeners
-	hub.listenersMutex.Unlock()
+
 }
 
 func (hub *notificationHub) AddNotification(n notification.Notification) {
 	hub.listenersMutex.RLock()
+	defer hub.listenersMutex.RUnlock()
 	currListeners, ok := hub.listeners[n.ID()]
 	if !ok {
 		return
@@ -65,5 +67,5 @@ func (hub *notificationHub) AddNotification(n notification.Notification) {
 	for _, listener := range currListeners {
 		listener.DeliverNotification(n)
 	}
-	hub.listenersMutex.RUnlock()
+
 }
