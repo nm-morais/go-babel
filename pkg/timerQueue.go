@@ -4,7 +4,6 @@ import (
 	"container/heap"
 	"math"
 	"math/rand"
-	"reflect"
 	"time"
 
 	"github.com/nm-morais/go-babel/pkg/dataStructures"
@@ -52,14 +51,16 @@ func NewTimerQueue() TimerQueue {
 }
 
 func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) int {
+	newTimerId := rand.Int()
 	pqItem := &dataStructures.Item{
 		Value: &pqItemValue{
 			protoID: protocolId,
 			timer:   timer,
 		},
+		Key:      newTimerId,
 		Priority: timer.Deadline().UnixNano(),
-		Key:      rand.Int(),
 	}
+	tq.logger.Infof("Adding timer with ID %d", newTimerId)
 	tq.addTimerChan <- pqItem
 	return pqItem.Key
 }
@@ -104,41 +105,39 @@ LOOP:
 			value := nextItem.Value.(*pqItemValue)
 			waitTime = time.Until(value.timer.Deadline())
 			currTimer = time.NewTimer(waitTime)
-			tq.logger.Infof("Waiting %s for timer of type %s with id %d", waitTime, reflect.TypeOf(value.timer), nextItem.Key)
+			//tq.logger.Infof("Waiting %s for timer of type %s with id %d", waitTime, reflect.TypeOf(value.timer), nextItem.Key)
 		}
 
 		select {
 		case req := <-tq.cancelTimerChan:
-			tq.logger.Infof("Received cancel timer signal...")
+			// tq.logger.Infof("Received cancel timer signal...")
 			if req.key == nextItem.Key {
 				req.removed <- req.key
-				tq.logger.Infof("Removed timer %d successfully", req.key)
+				// tq.logger.Infof("Removed timer %d successfully", req.key)
 				continue LOOP
 			} else {
 				heap.Push(&tq.pq, nextItem)
 			}
 			aux := tq.removeItem(req.key)
 
-			if aux != -1 {
-				tq.logger.Infof("Removed timer %d successfully", req.key)
-			} else {
-				tq.logger.Warnf("Removing timer %d failure: not found", req.key)
-			}
+			// if aux != -1 {
+			// 	tq.logger.Infof("Removed timer %d successfully", req.key)
+			// } else {
+			// 	tq.logger.Warnf("Removing timer %d failure: not found", req.key)
+			// }
 			req.removed <- aux
 			//tq.pq.LogEntries(tq.logger)
 		case newItem := <-tq.addTimerChan:
-			tq.logger.Infof("Received add timer signal...")
-
-			tq.logger.Infof("Adding timer %d", newItem.Key)
+			// tq.logger.Infof("Received add timer signal...")
+			// tq.logger.Infof("Adding timer %d", newItem.Key)
 			heap.Push(&tq.pq, newItem)
-
 			if nextItem != nil {
-				tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", nextItem.Key)
+				// tq.logger.Infof("nextItem (%d) was not nil, re-adding to timer list", nextItem.Key)
 				heap.Push(&tq.pq, nextItem)
 			}
 			//tq.pq.LogEntries(tq.logger)
 		case <-currTimer.C:
-			tq.logger.Infof("Processing timer %+v", *nextItem)
+			// tq.logger.Infof("Processing timer %+v", *nextItem)
 			value := nextItem.Value.(*pqItemValue)
 			if proto, ok := p.protocols.Load(value.protoID); ok {
 				proto.(protocolValueType).DeliverTimer(value.timer)

@@ -22,29 +22,43 @@ type peer struct {
 }
 
 func NewPeer(ip net.IP, protosPort uint16, analyticsPort uint16) Peer {
-	return peer{
+	return &peer{
 		ip:            ip,
 		protosPort:    protosPort,
 		analyticsPort: analyticsPort,
 	}
 }
-func (p peer) IP() net.IP {
+func (p *peer) IP() net.IP {
 	return p.ip
 }
 
-func (p peer) ProtosPort() uint16 {
+func (p *peer) ProtosPort() uint16 {
 	return p.protosPort
 }
 
-func (p peer) AnalyticsPort() uint16 {
+func (p *peer) AnalyticsPort() uint16 {
 	return p.analyticsPort
 }
 
-func (p peer) ToString() string {
+func (p *peer) ToString() string {
+
+	if p == nil {
+		return "<nil>"
+	}
+
 	return fmt.Sprintf("%s:%d", p.ip, p.protosPort)
 }
 
-func (p peer) Equals(otherPeer Peer) bool {
+func (p *peer) Equals(otherPeer Peer) bool {
+
+	if p == nil {
+		return false
+	}
+
+	if otherPeer == nil {
+		return false
+	}
+
 	return p.ToString() == otherPeer.ToString()
 }
 

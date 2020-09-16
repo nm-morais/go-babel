@@ -27,23 +27,6 @@ import (
 
 const ProtoManagerCaller = "ProtoManager"
 
-/*
-type IProtocolManager interface {
-	RegisteredProtos() []protocol.ID
-	RegisterProtocol(protocol protocol.Protocol) Error
-	RegisterRequestHandler(protocol protocol.ID, request request.ID, handler handlers.RequestHandler) Error
-	RegisterMessageHandler(protocol protocol.ID, request message.ID, handler handlers.MessageHandler) Error
-	ReceiveMessage(message message.Message, peer peer.Peer)
-	Write(message message.Message, peer peer.Peer, origin protocol.ID, destinations []protocol.ID) Error
-	SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) Error
-	Dial(peer peer.Peer, sourceProto protocol.ID, transport transport.Stream) Error
-	dialFailed(peer peer.Peer, sourceProto protocol.ID)
-	dialSuccess(peer peer.Peer, sourceProto protocol.ID)
-	inConnRequested(peerProtos []protocol.ID, peer peer.Peer, transport transport.Stream) bool
-	transportFailure(peerProtos []protocol.ID, transport transport.Stream)
-}
-*/
-
 type ProtocolManagerConfig struct {
 	LogFolder        string
 	HandshakeTimeout time.Duration
@@ -104,13 +87,13 @@ func RegisterProtocol(protocol protocol.Protocol) errors.Error {
 	return nil
 }
 
-func RegisterNotificationHandler(protoID protocol.ID, notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
+func RegisterNotificationHandler(protoID protocol.ID, notification notification.Notification, handler handlers.NotificationHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
-	if ok {
-		p.logger.Panicf("Protocol %d already registered", protoID)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", protoID)
 	}
-	p.notificationHub.AddListener(notificationID, proto.(protocolValueType))
-	proto.(protocolValueType).RegisterNotificationHandler(notificationID, handler)
+	p.notificationHub.AddListener(notification.ID(), proto.(protocolValueType))
+	proto.(protocolValueType).RegisterNotificationHandler(notification.ID(), handler)
 	return nil
 }
 
