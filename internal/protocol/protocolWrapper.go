@@ -14,6 +14,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const ()
+
 type WrapperProtocol struct {
 	id              protocol.ID
 	wrappedProtocol protocol.Protocol
@@ -42,7 +44,7 @@ type WrapperProtocol struct {
 	outConnDown            chan peer.Peer
 }
 
-const ChannelSize = 10 // buffer 10 events in channel
+const ChannelSize = 100 // buffer 10 events in channel
 type reqWithReplyCHan struct {
 	req      request.Request
 	respChan chan request.Reply

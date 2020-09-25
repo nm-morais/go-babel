@@ -10,24 +10,27 @@ type HeartbeatMessage struct {
 	TimeStamp  time.Time
 	IsReply    bool
 	ForceReply bool
+	Initial    bool
 	Sender     peer.Peer
 }
 
-func NewHBMessageNoReply(sender peer.Peer) HeartbeatMessage {
+func NewHBMessageNoReply(sender peer.Peer, initial bool) HeartbeatMessage {
 	return HeartbeatMessage{
 		Sender:     sender,
 		ForceReply: false,
 		IsReply:    false,
 		TimeStamp:  time.Now(),
+		Initial:    initial,
 	}
 }
 
-func NewHBMessageForceReply(sender peer.Peer) HeartbeatMessage {
+func NewHBMessageForceReply(sender peer.Peer, initial bool) HeartbeatMessage {
 	return HeartbeatMessage{
 		Sender:     sender,
 		ForceReply: true,
 		IsReply:    false,
 		TimeStamp:  time.Now(),
+		Initial:    initial,
 	}
 }
 
@@ -41,6 +44,12 @@ func SerializeHeartbeatMessage(m HeartbeatMessage) []byte {
 	}
 
 	if m.ForceReply {
+		peerBytes = append(peerBytes, byte(1))
+	} else {
+		peerBytes = append(peerBytes, byte(0))
+	}
+
+	if m.Initial {
 		peerBytes = append(peerBytes, byte(1))
 	} else {
 		peerBytes = append(peerBytes, byte(0))
@@ -65,6 +74,9 @@ func DeserializeHeartbeatMessage(bytes []byte) HeartbeatMessage {
 	forceReply := bytes[currPos] == 1
 	currPos++
 
+	initial := bytes[currPos] == 1
+	currPos++
+
 	var ts time.Time
 	err := ts.UnmarshalBinary(bytes[currPos:])
 	if err != nil {
@@ -76,6 +88,7 @@ func DeserializeHeartbeatMessage(bytes []byte) HeartbeatMessage {
 		IsReply:    isReply,
 		ForceReply: forceReply,
 		Sender:     p,
+		Initial:    initial,
 	}
 	return hbMsg
 }

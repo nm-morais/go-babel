@@ -17,7 +17,7 @@ type Error interface {
 
 func NonFatalError(code int, reason string, caller string) Error {
 	return &genericErr{
-		fatal:  true,
+		fatal:  false,
 		code:   code,
 		reason: reason,
 		caller: caller,

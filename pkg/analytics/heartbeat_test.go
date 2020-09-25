@@ -10,7 +10,7 @@ import (
 var testPeer = peer.NewPeer(net.IPv4(0, 0, 0, 0), 1000, 2000)
 
 func Test_serializeHeartbeatMessage(t *testing.T) {
-	test := NewHBMessageForceReply(testPeer)
+	test := NewHBMessageForceReply(testPeer, true)
 	bytes := SerializeHeartbeatMessage(test)
 	test2 := DeserializeHeartbeatMessage(bytes)
 
@@ -21,7 +21,7 @@ func Test_serializeHeartbeatMessage(t *testing.T) {
 }
 
 func Test_serializeHeartbeatMessage2(t *testing.T) {
-	test := NewHBMessageForceReply(testPeer)
+	test := NewHBMessageForceReply(testPeer, true)
 
 	bytes := SerializeHeartbeatMessage(test)
 
@@ -47,6 +47,11 @@ func Test_serializeHeartbeatMessage2(t *testing.T) {
 
 	if test.IsReply != test2.IsReply {
 		t.Error("isReply does not match")
+		t.FailNow()
+	}
+
+	if test.Initial != test2.Initial {
+		t.Error("Initial does not match")
 		t.FailNow()
 	}
 }

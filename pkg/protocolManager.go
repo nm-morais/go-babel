@@ -3,8 +3,12 @@ package pkg
 import (
 	"fmt"
 	"io"
+
+	_ "net/http/pprof"
 	"os"
 	"reflect"
+	"runtime"
+	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -28,6 +32,8 @@ import (
 const ProtoManagerCaller = "ProtoManager"
 
 type ProtocolManagerConfig struct {
+	Cpuprofile       bool
+	Memprofile       bool
 	LogFolder        string
 	HandshakeTimeout time.Duration
 	DialTimeout      time.Duration
@@ -373,6 +379,7 @@ func RegisterTimer(origin protocol.ID, timer timer.Timer) int {
 func Start() {
 
 	setupLoggers()
+	setupPerformanceProfiling(p.config.Cpuprofile, p.config.Memprofile)
 
 	for _, l := range p.listeners {
 		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
@@ -389,5 +396,43 @@ func Start() {
 		return true
 	})
 
-	select {}
+	deadline := time.Now().Add(7 * time.Minute)
+	ticker := time.NewTicker(5 * time.Second)
+	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
+	for {
+		select {
+		case <-ticker.C:
+			fmt.Printf("Remaining time until performance metrics:%d\n", time.Until(deadline))
+			fmt.Printf("Nr goroutines=%d\n", runtime.NumGoroutine())
+		case <-time.After(time.Until(deadline)):
+			if p.config.Cpuprofile {
+				pprof.StopCPUProfile()
+			}
+			if p.config.Memprofile {
+				f, err := os.Create(logFolder + "memprofile")
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = pprof.WriteHeapProfile(f)
+				if err != nil {
+					log.Fatal(err)
+				}
+				f.Close()
+			}
+		}
+	}
+}
+
+func setupPerformanceProfiling(doCpuprofile, doMemprofile bool) {
+	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
+	if doCpuprofile {
+		f, err := os.Create(logFolder + "cpuprofile")
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = pprof.StartCPUProfile(f)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 }

@@ -5,24 +5,33 @@ import (
 	"io"
 )
 
-type MessageReader struct {
-	reader io.Reader
+type MessageReader interface {
+	io.ReadCloser
+}
+
+type messageReader struct {
+	stream io.ReadCloser
 	buf    []byte
 }
 
-func NewMessageReader(reader io.Reader) *MessageReader {
-	return &MessageReader{reader: reader, buf: make([]byte, 2048)}
+func NewMessageReader(readCLoser io.ReadCloser) MessageReader {
+	return &messageReader{stream: readCLoser, buf: make([]byte, 2048)}
 }
 
-func (a *MessageReader) Read(msgBytes []byte) (int, error) {
+func (a *messageReader) Close() error {
+	a.buf = nil
+	return a.stream.Close()
+}
+
+func (a *messageReader) Read(msgBytes []byte) (int, error) {
 
 	msgSizeBytes := make([]byte, 4)
-	_, err := io.ReadFull(a.reader, msgSizeBytes)
+	_, err := io.ReadFull(a.stream, msgSizeBytes)
 	if err != nil {
 		return 0, err
 	}
 	msgSize := int(binary.BigEndian.Uint32(msgSizeBytes))
-	return io.ReadFull(a.reader, msgBytes[:msgSize])
+	return io.ReadFull(a.stream, msgBytes[:msgSize])
 
 	/*
 		for {

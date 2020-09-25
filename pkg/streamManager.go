@@ -26,8 +26,7 @@ type streamManager struct {
 	inboundTransports  *sync.Map
 	outboundTransports *sync.Map
 
-	hbChannels *sync.Map
-	hbTimers   *sync.Map
+	hbTimers *sync.Map
 
 	logger *log.Logger
 }
@@ -39,16 +38,8 @@ const (
 	PermanentTunnel = 1
 )
 
-type inboundStreamValueType = stream.Stream
-type outboundStreamValueType = struct {
-	mw                *messageIO.MessageWriter
-	outboundTransport stream.Stream
-}
-
-type hbTimerRoutineChannels = struct {
-	finish chan interface{}
-	renew  chan struct{}
-}
+type inboundStreamValueType = io.ReadCloser
+type outboundStreamValueType = io.WriteCloser
 
 type StreamManager interface {
 	AcceptConnectionsAndNotify(listener stream.Stream)
@@ -66,7 +57,6 @@ func NewStreamManager() StreamManager {
 		hbTimers:               &sync.Map{},
 		dialingTransports:      &sync.Map{},
 		dialingTransportsMutex: &sync.Mutex{},
-		hbChannels:             &sync.Map{},
 		inboundTransports:      &sync.Map{},
 		outboundTransports:     &sync.Map{},
 		logger:                 logs.NewLogger(streamManagerCaller),
@@ -143,10 +133,14 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 				continue
 			}
 			mr := messageIO.NewMessageReader(newStream)
+			mw := messageIO.NewMessageWriter(newStream)
+
 			handshakeMsg, err := sm.waitForHandshakeMessage(mr)
 			if err != nil {
 				err.Log(sm.logger)
-				newStream.Close()
+				mr.Close()
+				mw.Close()
+				newStream = nil
 				sm.logStreamManagerState()
 				continue
 			}
@@ -156,27 +150,32 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 				go sm.handleTmpStream(remotePeer, mr)
 				continue
 			}
-			sm.logger.Warnf("New connection from %s", remotePeer.ToString())
-			sm.inboundTransports.Store(remotePeer.ToString(), newStream)
 
+			err = sm.sendHandshakeMessage(mw, RegisteredProtos(), PermanentTunnel)
+			if err != nil {
+				sm.logger.Errorf("An error occurred during handshake with %s: %s", remotePeer.ToString(), err.Reason())
+				sm.inboundTransports.Delete(remotePeer.ToString())
+				mr.Close()
+				mw.Close()
+				newStream = nil
+				sm.logStreamManagerState()
+				continue
+			}
+
+			sm.logger.Warnf("New connection from %s", remotePeer.ToString())
+
+			sm.inboundTransports.Store(remotePeer.ToString(), newStream)
 			if !inConnRequested(handshakeMsg.Protos, remotePeer) {
-				newStream.Close()
+				mr.Close()
+				mw.Close()
+				newStream = nil
 				sm.inboundTransports.Delete(remotePeer.ToString())
 				sm.logger.Infof("Peer %s conn was not accepted, closing stream", remotePeer.ToString())
 				sm.logStreamManagerState()
 				continue
 			}
 
-			err = sm.sendHandshakeMessage(messageIO.NewMessageWriter(newStream), RegisteredProtos(), PermanentTunnel)
-			if err != nil {
-				sm.logger.Errorf("An error occurred during handshake with %s: %s", remotePeer.ToString(), err.Reason())
-				sm.inboundTransports.Delete(remotePeer.ToString())
-				newStream.Close()
-				sm.logStreamManagerState()
-				continue
-			}
-
-			go sm.handleInStream(mr, newStream, remotePeer)
+			go sm.handleInStream(mr, remotePeer)
 			sm.logger.Warnf("Accepted connection from %s successfully", remotePeer.ToString())
 			sm.logStreamManagerState()
 		}
@@ -244,6 +243,7 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 		sm.waitDial(dialingProto, toDial, waitChan)
 		return
 	}
+
 	done := make(chan interface{})
 	sm.dialingTransports.Store(toDial.ToString(), done)
 	defer func() {
@@ -266,41 +266,39 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	//sm.logger.Info("Remote protos: %d", handshakeMsg.Protos)
 	//sm.logger.Infof("Starting handshake...")
 
-	err = sm.sendHandshakeMessage(messageIO.NewMessageWriter(stream), RegisteredProtos(), PermanentTunnel)
+	mw := messageIO.NewMessageWriter(stream)
+	mr := messageIO.NewMessageReader(stream)
+
+	err = sm.sendHandshakeMessage(mw, RegisteredProtos(), PermanentTunnel)
 	if err != nil {
 		sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.ToString(), err.Reason())
+		mr.Close()
+		mw.Close()
 		dialError(dialingProto, toDial)
 		stream.Close()
+		stream = nil
 		return
 	}
 
-	mr := messageIO.NewMessageReader(stream)
 	handshakeMsg, err := sm.waitForHandshakeMessage(mr)
 	if err != nil {
-		stream.Close()
+		mr.Close()
+		mw.Close()
+		dialError(dialingProto, toDial)
 		sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.ToString(), err.Reason())
+		stream = nil
 		return
 	}
 
-	newOutboundConn := outboundStreamValueType{
-		mw:                messageIO.NewMessageWriter(stream),
-		outboundTransport: stream,
-	}
-
-	hbChannel := hbTimerRoutineChannels{
-		finish: make(chan interface{}),
-		renew:  make(chan struct{}),
-	}
-
-	sm.hbChannels.Store(toDial.ToString(), hbChannel)
+	newOutboundConn := messageIO.NewMessageWriter(stream)
 	sm.outboundTransports.Store(toDial.ToString(), newOutboundConn)
-
 	if !dialSuccess(dialingProto, handshakeMsg.Protos, toDial) {
-		sm.logger.Panicf("No protocol accepted conn")
-		stream.Close()
-		sm.hbChannels.Delete(toDial.ToString())
+		sm.logger.Error("No protocol accepted conn")
+		mr.Close()
+		mw.Close()
 		sm.outboundTransports.Delete(toDial.ToString())
 		sm.logStreamManagerState()
+		stream = nil
 		return
 	}
 	sm.logger.Warnf("Dialed %s successfully", toDial.ToString())
@@ -320,13 +318,13 @@ func (sm streamManager) SendMessage(message []byte, peer peer.Peer) errors.Error
 		}
 		waitChan := doneDialing.(chan interface{})
 		<-waitChan
-		_, ok = sm.outboundTransports.Load(peer.ToString())
+		outboundStream, ok = sm.outboundTransports.Load(peer.ToString())
 		if !ok {
 			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
 		}
 	}
 
-	_, err := outboundStream.(outboundStreamValueType).mw.Write(message)
+	_, err := outboundStream.(outboundStreamValueType).Write(message)
 	if err != nil {
 		sm.logger.Error(err)
 		sm.handleOutboundTransportFailure(peer)
@@ -338,7 +336,7 @@ func (sm streamManager) Disconnect(peer peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Disconnecting from %s", peer.ToString())
 	sm.dialingTransportsMutex.Lock()
 	if conn, ok := sm.outboundTransports.Load(peer.ToString()); ok {
-		conn.(outboundStreamValueType).outboundTransport.Close()
+		conn.(outboundStreamValueType).Close()
 		sm.outboundTransports.Delete(peer.ToString())
 	}
 	if conn, ok := sm.inboundTransports.Load(peer.ToString()); ok {
@@ -349,7 +347,7 @@ func (sm streamManager) Disconnect(peer peer.Peer) {
 	sm.logStreamManagerState()
 }
 
-func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Stream, newPeer peer.Peer) {
+func (sm streamManager) handleInStream(mr inboundStreamValueType, newPeer peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Handling peer stream %s", newPeer.ToString())
 	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.ToString())
 
@@ -363,7 +361,8 @@ func (sm streamManager) handleInStream(mr *messageIO.MessageReader, t stream.Str
 			} else {
 				sm.logger.Error(err)
 			}
-			t.Close()
+			mr.Close()
+			mr = nil
 			sm.inboundTransports.Delete(newPeer.ToString())
 			return
 		}
@@ -404,27 +403,22 @@ func (sm streamManager) handleOutboundTransportFailure(remotePeer peer.Peer) err
 	sm.dialingTransportsMutex.Lock()
 	outConn, ok := sm.outboundTransports.Load(remotePeer.ToString())
 	if ok {
-		outConn.(outboundStreamValueType).outboundTransport.Close()
+		outConn.(outboundStreamValueType).Close()
 		sm.outboundTransports.Delete(remotePeer.ToString())
-	}
-	_, ok = sm.inboundTransports.Load(remotePeer.ToString())
-	if ok {
-		outConn.(inboundStreamValueType).Close()
-		sm.inboundTransports.Delete(remotePeer.ToString())
 	}
 	sm.dialingTransportsMutex.Unlock()
 	outTransportFailure(remotePeer)
 	return nil
 }
 
-func (sm streamManager) handleTmpStream(newPeer peer.Peer, transport io.Reader) {
+func (sm streamManager) handleTmpStream(newPeer peer.Peer, mr messageIO.MessageReader) {
 
 	if newPeer.ToString() == SelfPeer().ToString() {
 		panic("Dialing self")
 	}
 
 	//sm.logger.Info("Reading from tmp stream")
-	msg, err := sm.readAppMessage(transport)
+	msg, err := sm.readAppMessage(mr)
 	if err != nil {
 		err.Log(sm.logger)
 		return
@@ -440,6 +434,8 @@ func (sm streamManager) handleTmpStream(newPeer peer.Peer, transport io.Reader) 
 			sm.logger.Errorf("Ignored message: %+v", appMsg)
 		}
 	}
+	mr.Close()
+	mr = nil
 }
 
 func (sm streamManager) waitForHandshakeMessage(transport io.Reader) (*internalMsg.ProtoHandshakeMessage, errors.Error) {

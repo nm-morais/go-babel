@@ -62,7 +62,7 @@ func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) in
 	}
 	tq.logger.Infof("Adding timer with ID %d", newTimerId)
 	tq.addTimerChan <- pqItem
-	return pqItem.Key
+	return newTimerId
 }
 
 func (tq *timerQueueImpl) removeItem(timerID int) int {
@@ -96,6 +96,8 @@ func (tq *timerQueueImpl) start() {
 
 LOOP:
 	for {
+		tq.logger.Infof("timer queue loop")
+
 		var nextItem *dataStructures.Item
 		var waitTime time.Duration
 		var currTimer = time.NewTimer(math.MaxInt64)

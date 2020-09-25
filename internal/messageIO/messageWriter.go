@@ -5,19 +5,28 @@ import (
 	"io"
 )
 
-type MessageWriter struct {
-	w io.Writer
+type MessageWriter interface {
+	io.WriteCloser
 }
 
-func NewMessageWriter(w io.Writer) *MessageWriter {
-	return &MessageWriter{
-		w: w,
+type messageWriter struct {
+	outStream io.WriteCloser
+}
+
+func NewMessageWriter(w io.WriteCloser) MessageWriter {
+	return &messageWriter{
+		outStream: w,
 	}
 }
 
-func (w *MessageWriter) Write(p []byte) (int, error) {
-	//log.Infof("MessageWriter writing...")
+func (w *messageWriter) Close() error {
+	//log.Infof("messageWriter writing...")
+	return w.outStream.Close()
+}
+
+func (w *messageWriter) Write(p []byte) (int, error) {
+	//log.Infof("messageWriter writing...")
 	msgSizeBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(p)))
-	return w.w.Write(append(msgSizeBytes, p...))
+	return w.outStream.Write(append(msgSizeBytes, p...))
 }
