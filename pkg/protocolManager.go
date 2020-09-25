@@ -424,6 +424,7 @@ func Start() {
 }
 
 func setupPerformanceProfiling(doCpuprofile, doMemprofile bool) {
+
 	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
 	if doCpuprofile {
 		f, err := os.Create(logFolder + "cpuprofile")

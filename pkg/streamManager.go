@@ -435,7 +435,6 @@ func (sm streamManager) handleTmpStream(newPeer peer.Peer, mr messageIO.MessageR
 		}
 	}
 	mr.Close()
-	mr = nil
 }
 
 func (sm streamManager) waitForHandshakeMessage(transport io.Reader) (*internalMsg.ProtoHandshakeMessage, errors.Error) {
