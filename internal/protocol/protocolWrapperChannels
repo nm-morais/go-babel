@@ -1,0 +1,329 @@
+// package protocol
+
+// import (
+// 	"fmt"
+
+// 	"github.com/nm-morais/go-babel/pkg/errors"
+// 	"github.com/nm-morais/go-babel/pkg/handlers"
+// 	"github.com/nm-morais/go-babel/pkg/message"
+// 	"github.com/nm-morais/go-babel/pkg/notification"
+// 	"github.com/nm-morais/go-babel/pkg/peer"
+// 	"github.com/nm-morais/go-babel/pkg/protocol"
+// 	"github.com/nm-morais/go-babel/pkg/request"
+// 	"github.com/nm-morais/go-babel/pkg/timer"
+//  log "github.com/sirupsen/logrus"
+// )
+
+// const ()
+
+// type WrapperProtocol struct {
+// 	id              protocol.ID
+// 	wrappedProtocol protocol.Protocol
+
+// 	// handlers
+// 	notificationHandlers map[notification.ID]handlers.NotificationHandler
+// 	requestHandlers      map[request.ID]handlers.RequestHandler
+// 	messageHandlers      map[message.ID]handlers.MessageHandler
+// 	replyHandlers        map[request.ID]handlers.ReplyHandler
+// 	timerHandlers        map[timer.ID]handlers.TimerHandler
+
+// 	// channels (internal only)
+// 	// applicational
+// 	messageChan      chan messageWithPeer
+// 	requestChan      chan reqWithReplyCHan
+// 	timerChan        chan timer.Timer
+// 	replyChan        chan request.Reply
+// 	notificationChan chan notification.Notification
+
+// 	// connection events
+// 	messageDeliveryErrChan chan messageWithPeerAndErr
+// 	messageDeliveredChan   chan messageWithPeer
+// 	dialSuccess            chan dialSuccessWithBoolReplyChan
+// 	inConnRequested        chan inConnReqEventWithBoolReply
+// 	dialFailed             chan peer.Peer
+// 	outConnDown            chan peer.Peer
+// }
+
+// const ChannelSize = 100 // buffer 10 events in channel
+// type reqWithReplyCHan struct {
+// 	req      request.Request
+// 	respChan chan request.Reply
+// }
+
+// type dialSuccessWithBoolReplyChan struct {
+// 	dialingProto protocol.ID
+// 	peer         peer.Peer
+// 	respChan     chan bool
+// }
+
+// type messageWithPeer struct {
+// 	peer    peer.Peer
+// 	message message.Message
+// }
+
+// type messageWithPeerAndErr struct {
+// 	peer    peer.Peer
+// 	message message.Message
+// 	err     errors.Error
+// }
+
+// type inConnReqEventWithBoolReply struct {
+// 	peer     peer.Peer
+// 	respChan chan bool
+// }
+
+// func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
+// 	return WrapperProtocol{
+// 		id:              protocol.ID(),
+// 		wrappedProtocol: protocol,
+
+// 		notificationHandlers: make(map[notification.ID]handlers.NotificationHandler),
+// 		requestHandlers:      make(map[request.ID]handlers.RequestHandler),
+// 		messageHandlers:      make(map[message.ID]handlers.MessageHandler),
+// 		replyHandlers:        make(map[request.ID]handlers.ReplyHandler),
+// 		timerHandlers:        make(map[timer.ID]handlers.TimerHandler),
+
+// 		// applicational event channels
+// 		messageChan:            make(chan messageWithPeer, ChannelSize),
+// 		requestChan:            make(chan reqWithReplyCHan, ChannelSize),
+// 		replyChan:              make(chan request.Reply, ChannelSize),
+// 		timerChan:              make(chan timer.Timer, ChannelSize),
+// 		notificationChan:       make(chan notification.Notification, ChannelSize),
+// 		messageDeliveredChan:   make(chan messageWithPeer, ChannelSize),
+// 		messageDeliveryErrChan: make(chan messageWithPeerAndErr, ChannelSize),
+
+// 		// transport event channels
+// 		dialFailed:      make(chan peer.Peer),
+// 		outConnDown:     make(chan peer.Peer),
+// 		dialSuccess:     make(chan dialSuccessWithBoolReplyChan),
+// 		inConnRequested: make(chan inConnReqEventWithBoolReply),
+// 	}
+// }
+
+// //  channel Deliverers
+
+// func (pw WrapperProtocol) DeliverRequestReply(reply request.Reply) {
+// 	pw.replyChan <- reply
+// }
+
+// func (pw WrapperProtocol) DeliverNotification(notification notification.Notification) {
+// 	pw.notificationChan <- notification
+// }
+
+// func (pw WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
+// 	pw.messageChan <- messageWithPeer{
+// 		peer:    sender,
+// 		message: msg,
+// 	}
+// }
+
+// func (pw WrapperProtocol) DeliverTimer(timer timer.Timer) {
+// 	pw.timerChan <- timer
+// }
+
+// func (pw WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Reply {
+// 	aux := reqWithReplyCHan{
+// 		req:      req,
+// 		respChan: make(chan request.Reply),
+// 	}
+// 	pw.requestChan <- aux
+// 	return aux.respChan
+// }
+
+// // channel handler
+
+// func (pw WrapperProtocol) handleChannels() {
+// 	for {
+// 		//log.Infof("New event")
+// 		select {
+// 		// net events
+// 		case event := <-pw.inConnRequested:
+// 			event.respChan <- pw.wrappedProtocol.InConnRequested(event.peer)
+// 		case event := <-pw.dialSuccess:
+// 			event.respChan <- pw.wrappedProtocol.DialSuccess(event.dialingProto, event.peer)
+// 		case peerDialed := <-pw.dialFailed:
+// 			pw.wrappedProtocol.DialFailed(peerDialed)
+// 		case failedPeer := <-pw.outConnDown:
+// 			pw.wrappedProtocol.OutConnDown(failedPeer)
+// 		case deliverySucc := <-pw.messageDeliveredChan:
+// 			pw.wrappedProtocol.MessageDelivered(deliverySucc.message, deliverySucc.peer)
+// 		case failedDelivery := <-pw.messageDeliveryErrChan:
+// 			pw.wrappedProtocol.MessageDeliveryErr(failedDelivery.message, failedDelivery.peer, failedDelivery.err)
+
+// 		// applicational events
+// 		case req := <-pw.requestChan:
+// 			req.respChan <- pw.handleRequest(req.req)
+// 		case reply := <-pw.replyChan:
+// 			pw.handleReply(reply)
+// 		case t := <-pw.timerChan:
+// 			pw.handleTimer(t)
+// 		case m := <-pw.messageChan:
+// 			pw.handleMessage(m.peer, m.message)
+// 		case n := <-pw.notificationChan:
+// 			pw.handleNotification(n)
+// 		}
+// 	}
+
+// }
+
+// // internal handlers
+
+// func (pw WrapperProtocol) handleNotification(notification notification.Notification) {
+// 	handler, ok := pw.notificationHandlers[notification.ID()]
+// 	if !ok {
+// 		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+// 	}
+// 	handler(notification)
+// }
+
+// func (pw WrapperProtocol) handleTimer(timer timer.Timer) {
+// 	handler, ok := pw.timerHandlers[timer.ID()]
+// 	if !ok {
+// 		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+// 	}
+// 	handler(timer)
+// }
+
+// func (pw WrapperProtocol) handleReply(reply request.Reply) {
+// 	handler, ok := pw.requestHandlers[reply.ID()]
+// 	if !ok {
+// 		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+// 	}
+// 	handler(reply)
+// }
+
+// func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
+// 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
+// 	if !ok {
+// 		panic(errors.FatalError(404, "receivedMsg handler not found", string(pw.wrappedProtocol.ID())))
+// 	}
+// 	handler(peer, receivedMsg)
+// }
+
+// func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
+// 	handler, ok := pw.requestHandlers[request.ID()]
+// 	if !ok {
+// 		panic(errors.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
+// 	}
+// 	return handler(request)
+// }
+
+// // Register handlers
+
+// // messages
+// // notifications
+// // requests
+// // replies
+// // timer
+
+// func (pw WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
+// 	_, exists := pw.messageHandlers[messageID]
+// 	if exists {
+// 		return errors.FatalError(409, fmt.Sprintf("Message handler with MsgID: %d already exists", messageID), string(pw.wrappedProtocol.ID()))
+// 	}
+// 	pw.messageHandlers[messageID] = handler
+// 	return nil
+// }
+
+// func (pw WrapperProtocol) RegisterNotificationHandler(notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
+// 	_, exists := pw.notificationHandlers[notificationID]
+// 	if exists {
+// 		return errors.FatalError(409, fmt.Sprintf("Notification handler with notificationID: %d already exists", notificationID), string(pw.wrappedProtocol.ID()))
+// 	}
+// 	pw.notificationHandlers[notificationID] = handler
+// 	return nil
+// }
+
+// func (pw WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
+// 	_, exists := pw.replyHandlers[replyID]
+// 	if exists {
+// 		return errors.FatalError(409, fmt.Sprintf("Request handler with replyID: %d already exists", replyID), string(pw.wrappedProtocol.ID()))
+// 	}
+// 	pw.replyHandlers[replyID] = handler
+// 	return nil
+// }
+
+// func (pw WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
+// 	_, exists := pw.requestHandlers[requestID]
+// 	if exists {
+// 		return errors.FatalError(409, fmt.Sprintf("Request handler with MsgID: %d already exists", requestID), string(pw.wrappedProtocol.ID()))
+// 	}
+// 	pw.requestHandlers[requestID] = handler
+// 	return nil
+// }
+
+// func (pw WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
+// 	_, exists := pw.timerHandlers[timerID]
+// 	if exists {
+// 		return errors.FatalError(409, fmt.Sprintf("Request handler with timerID: %d already exists", timerID), string(pw.wrappedProtocol.ID()))
+// 	}
+// 	pw.timerHandlers[timerID] = handler
+// 	return nil
+// }
+
+// //
+
+// func (pw WrapperProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
+// 	pw.messageDeliveredChan <- messageWithPeer{
+// 		peer:    peer,
+// 		message: message,
+// 	}
+// }
+
+// func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
+// 	pw.messageDeliveryErrChan <- messageWithPeerAndErr{
+// 		peer:    peer,
+// 		message: message,
+// 		err:     error,
+// 	}
+// }
+
+// func (pw WrapperProtocol) ID() protocol.ID {
+// 	return pw.wrappedProtocol.ID()
+// }
+
+// func (pw WrapperProtocol) Start() {
+// 	pw.wrappedProtocol.Start()
+// 	go pw.handleChannels()
+// }
+
+// func (pw WrapperProtocol) Init() {
+// 	pw.wrappedProtocol.Init()
+// }
+
+// func (pw WrapperProtocol) InConnRequested(peer peer.Peer) bool {
+// 	event := inConnReqEventWithBoolReply{
+// 		peer:     peer,
+// 		respChan: make(chan bool),
+// 	}
+// 	pw.inConnRequested <- event
+// 	reply := <-event.respChan
+// 	return reply
+// }
+
+// func (pw WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) bool {
+// 	event := dialSuccessWithBoolReplyChan{
+// 		dialingProto: dialerProto,
+// 		peer:         peer,
+// 		respChan:     make(chan bool),
+// 	}
+// 	pw.dialSuccess <- event
+// 	reply := <-event.respChan
+// 	return reply
+// }
+
+// func (pw WrapperProtocol) DialFailed(peer peer.Peer) {
+// 	pw.dialFailed <- peer
+// }
+
+// func (pw WrapperProtocol) OutConnDown(peer peer.Peer) {
+// 	pw.outConnDown <- peer
+// }
+
+// func (pw WrapperProtocol) Logger() *log.Logger {
+// 	return pw.wrappedProtocol.Logger()
+// }
+
+// func (pw WrapperProtocol) Name() string {
+// 	return pw.wrappedProtocol.Name()
+// }

@@ -71,7 +71,7 @@ func main() {
 		Peer:             peer.NewPeer(net.IPv4(127, 0, 0, 1), uint16(protosPortVar), uint16(analyticsPortVar)),
 	}
 
-	fmt.Println("Self peer: ", protoManagerConf.Peer.ToString())
+	fmt.Println("Self peer: ", protoManagerConf.Peer.String())
 	nodeWatcherConf := pkg.NodeWatcherConf{
 		MaxRedials:              3,
 		HbTickDuration:          1 * time.Second,

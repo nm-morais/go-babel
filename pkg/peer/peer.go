@@ -12,7 +12,7 @@ type Peer interface {
 	AnalyticsPort() uint16
 	Equals(other Peer) bool
 	SerializeToBinary() []byte
-	ToString() string
+	String() string
 }
 
 type peer struct {
@@ -40,7 +40,7 @@ func (p *peer) AnalyticsPort() uint16 {
 	return p.analyticsPort
 }
 
-func (p *peer) ToString() string {
+func (p *peer) String() string {
 
 	if p == nil {
 		return "<nil>"
@@ -59,7 +59,7 @@ func (p *peer) Equals(otherPeer Peer) bool {
 		return false
 	}
 
-	return p.ToString() == otherPeer.ToString()
+	return p.String() == otherPeer.String()
 }
 
 func (p peer) SerializeToBinary() []byte {

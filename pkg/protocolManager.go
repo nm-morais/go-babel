@@ -214,21 +214,21 @@ func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceP
 }
 
 func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t stream.Stream) {
-	p.logger.Warnf("Dialing new node %s", toDial.ToString())
+	p.logger.Warnf("Dialing new node %s", toDial.String())
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
 
 func Disconnect(source protocol.ID, peer peer.Peer) {
 	go func() {
-		p.logger.Warnf("Proto %d disconnecting from peer %s", source, peer.ToString())
+		p.logger.Warnf("Proto %d disconnecting from peer %s", source, peer.String())
 		p.channelSubscribersMutex.Lock()
-		subs := p.channelSubscribers[peer.ToString()]
+		subs := p.channelSubscribers[peer.String()]
 		delete(subs, source)
+		p.channelSubscribersMutex.Unlock()
 		if len(subs) == 0 {
-			p.logger.Warnf("Disconnecting from %s", peer.ToString())
+			p.logger.Warnf("Disconnecting from %s", peer.String())
 			p.streamManager.Disconnect(peer)
 		}
-		p.channelSubscribersMutex.Unlock()
 	}()
 }
 
@@ -238,7 +238,7 @@ func SelfPeer() peer.Peer {
 
 func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
 	p.channelSubscribersMutex.Lock()
-	subs := p.channelSubscribers[dialer.ToString()]
+	subs := p.channelSubscribers[dialer.String()]
 	if subs == nil {
 		subs = make(map[protocol.ID]bool)
 	}
@@ -250,11 +250,11 @@ func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
 		}
 	}
 	if len(subs) == 0 {
-		delete(p.channelSubscribers, dialer.ToString())
+		delete(p.channelSubscribers, dialer.String())
 		p.channelSubscribersMutex.Unlock()
 		return false
 	}
-	p.channelSubscribers[dialer.ToString()] = subs
+	p.channelSubscribers[dialer.String()] = subs
 	p.channelSubscribersMutex.Unlock()
 	return true
 }
@@ -269,7 +269,7 @@ func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
 
 func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer peer.Peer) bool {
 	p.channelSubscribersMutex.Lock()
-	subs := p.channelSubscribers[dialedPeer.ToString()]
+	subs := p.channelSubscribers[dialedPeer.String()]
 	if subs == nil {
 		subs = make(map[protocol.ID]bool)
 	}
@@ -285,30 +285,30 @@ func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer
 	}
 
 	if len(subs) == 0 {
-		delete(p.channelSubscribers, dialedPeer.ToString())
+		delete(p.channelSubscribers, dialedPeer.String())
 		p.channelSubscribersMutex.Unlock()
 		return false
 	}
-	p.channelSubscribers[dialedPeer.ToString()] = subs
+	p.channelSubscribers[dialedPeer.String()] = subs
 	p.channelSubscribersMutex.Unlock()
 	return true
 
 }
 
 func outTransportFailure(peer peer.Peer) {
-	p.logger.Warn("Handling transport failure from ", peer.ToString())
+	p.logger.Warn("Handling transport failure from ", peer.String())
 	p.channelSubscribersMutex.Lock()
-	toNotify := p.channelSubscribers[peer.ToString()]
+	toNotify := p.channelSubscribers[peer.String()]
 	for protoID := range toNotify {
 		proto, _ := p.protocols.Load(protoID)
 		proto.(protocolValueType).OutConnDown(peer)
 	}
-	delete(p.channelSubscribers, peer.ToString())
+	delete(p.channelSubscribers, peer.String())
 	p.channelSubscribersMutex.Unlock()
 }
 
 func setupLoggers() {
-	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
+	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
 
 	os.RemoveAll(logFolder)
 	err := os.Mkdir(logFolder, 0777)
@@ -398,7 +398,7 @@ func Start() {
 
 	deadline := time.Now().Add(7 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
-	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
+	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
 	for {
 		select {
 		case <-ticker.C:
@@ -425,7 +425,7 @@ func Start() {
 
 func setupPerformanceProfiling(doCpuprofile, doMemprofile bool) {
 
-	logFolder := p.config.LogFolder + p.config.Peer.ToString() + "/"
+	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
 	if doCpuprofile {
 		f, err := os.Create(logFolder + "cpuprofile")
 		if err != nil {

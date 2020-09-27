@@ -93,7 +93,7 @@ func NewPingPongProtocol(contact peer.Peer) protocol.Protocol {
 }
 
 func (m *PingPongProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
-	m.logger.Debugf("Message %+v was sent to %s", message, peer.ToString())
+	m.logger.Debugf("Message %+v was sent to %s", message, peer.String())
 }
 
 func (m *PingPongProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
@@ -157,7 +157,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 	}
 
 	for remotePeer := range m.activePeers {
-		m.logger.Infof("Sending pingMessage to %s", remotePeer.ToString())
+		m.logger.Infof("Sending pingMessage to %s", remotePeer.String())
 		//pkg.Write(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		for i := 0; i < 1; i++ {
 			pkg.SendMessage(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
@@ -168,7 +168,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 }
 
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	m.logger.Infof("Connection established to peer %+v", peer.ToString())
+	m.logger.Infof("Connection established to peer %+v", peer.String())
 	if sourceProto == protoID {
 		m.activePeers[peer] = true
 		pkg.RegisterTimer(protoID, PingTimer{deadline: time.Now().Add(0 * time.Second)})
