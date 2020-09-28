@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nm-morais/go-babel/internal/messageIO"
@@ -19,7 +20,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/sirupsen/logrus"
-	"go.uber.org/atomic"
 )
 
 const nodeWatcherCaller = "NodeWatcher"
@@ -42,12 +42,12 @@ type NodeInfo struct {
 	mr       messageIO.MessageReader
 	peerConn net.Conn
 
-	nrMessagesReceived *atomic.Int32
+	nrMessagesReceived *int32
 	nrRetries          int
 	subscribers        map[protocol.ID]bool
 	peer               peer.Peer
-	closeOnce          *sync.Once
 	nrMessagesNoWait   int
+	enoughTestMessages chan interface{}
 	enoughSamples      chan interface{}
 	LatencyCalc        *analytics.LatencyCalculator
 	Detector           *analytics.Detector
@@ -162,14 +162,15 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 		nm.watchingLock.Unlock()
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
+	var nrMessages int32 = 0
 	nm.watching[p.String()] = NodeInfo{
 		nrRetries:          0,
-		closeOnce:          &sync.Once{},
-		nrMessagesReceived: &atomic.Int32{},
+		nrMessagesReceived: &nrMessages,
 		peer:               p,
 		LatencyCalc:        analytics.NewLatencyCalculator(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight),
 		Detector:           analytics.NewDetector(nm.conf.WindowSize, nm.conf.MinSamplesFaultDetector),
 		enoughSamples:      make(chan interface{}),
+		enoughTestMessages: make(chan interface{}),
 	}
 	nm.watchingLock.Unlock()
 	go nm.dialAndWatch(issuerProto, p)
@@ -186,20 +187,20 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 		nm.watchingLock.Unlock()
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
+	var nrMessages int32 = 0
 	newNodeInfo := NodeInfo{
 		nrRetries:          0,
-		closeOnce:          &sync.Once{},
-		nrMessagesReceived: &atomic.Int32{},
+		nrMessagesReceived: &nrMessages,
 		peer:               p,
 		LatencyCalc:        analytics.NewLatencyCalculatorWithValue(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight, latency),
 		Detector:           analytics.NewDetector(nm.conf.WindowSize, nm.conf.MinSamplesFaultDetector),
 		enoughSamples:      make(chan interface{}),
+		enoughTestMessages: make(chan interface{}),
 		nrMessagesNoWait:   0,
 	}
+	close(newNodeInfo.enoughSamples)
+	close(newNodeInfo.enoughTestMessages)
 	newNodeInfo.LatencyCalc.AddMeasurement(latency)
-	newNodeInfo.closeOnce.Do(func() {
-		nm.closeEnoughSamplesChan(newNodeInfo)
-	})
 	nm.watching[p.String()] = newNodeInfo
 	nm.watchingLock.Unlock()
 	go nm.dialAndWatch(issuerProto, p)
@@ -344,7 +345,6 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 				panic(err)
 			}
 		}
-		<-time.After(time.Until(udpTestDeadline))
 
 		nm.watchingLock.RLock()
 		nodeInfo, ok := nm.watching[p.String()]
@@ -352,22 +352,29 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 			nm.watchingLock.RUnlock()
 			return nil, errors.NonFatalError(500, "peer unwatched in the meantime", nodeWatcherCaller)
 		}
-
-		if int(nodeInfo.nrMessagesReceived.Load()) >= nm.conf.NrTestMessagesToReceive {
-			nm.watchingLock.RUnlock()
-			nm.logger.Infof("Established UDP connection to %s", p.String())
-			return &nm.udpConn, nil
-		}
 		nm.watchingLock.RUnlock()
 
-		nm.logger.Warnf("falling back to TCP")
-		// attempting to connect by TCP
-		rAddrTcp := &net.TCPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
-		tcpConn, err := net.DialTimeout("tcp", rAddrTcp.String(), nm.conf.TcpTestTimeout)
-		if err != nil {
-			continue
+		select {
+		case <-nodeInfo.enoughTestMessages:
+			nm.watchingLock.RLock()
+			nodeInfo, ok = nm.watching[p.String()]
+			if !ok {
+				nm.watchingLock.RUnlock()
+				return nil, errors.NonFatalError(500, "peer unwatched in the meantime", nodeWatcherCaller)
+			}
+			nm.watchingLock.RUnlock()
+			return &nm.udpConn, nil
+		case <-time.After(time.Until(udpTestDeadline)):
+
+			nm.logger.Warnf("falling back to TCP")
+			// attempting to connect by TCP
+			rAddrTcp := &net.TCPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
+			tcpConn, err := net.DialTimeout("tcp", rAddrTcp.String(), nm.conf.TcpTestTimeout)
+			if err != nil {
+				continue
+			}
+			return tcpConn, nil
 		}
-		return tcpConn, nil
 	}
 	return nil, errors.NonFatalError(500, "Could not establish connection", nodeWatcherCaller)
 }
@@ -469,7 +476,6 @@ func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw io.Writer) erro
 
 func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
-
 	if hb.IsReply {
 		sender := hb.Sender
 		nm.watchingLock.RLock()
@@ -510,24 +516,30 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage, nodeInfo NodeInfo) {
 	timeReceived := time.Now()
 	timeTaken := time.Since(hb.TimeStamp)
+	currMeasurement := int(atomic.AddInt32(nodeInfo.nrMessagesReceived, 1))
 	nodeInfo.LatencyCalc.AddMeasurement(timeTaken)
-	if nodeInfo.LatencyCalc.NrMeasurements() >= nm.conf.MinSamplesLatencyEstimate {
-		nodeInfo.closeOnce.Do(func() {
-			nm.closeEnoughSamplesChan(nodeInfo)
-		})
+
+	if currMeasurement == nm.conf.MinSamplesLatencyEstimate {
+		select {
+		case <-nodeInfo.enoughSamples:
+		default:
+			close(nodeInfo.enoughSamples)
+		}
 	}
+
+	if currMeasurement == nm.conf.NrTestMessagesToReceive {
+		select {
+		case <-nodeInfo.enoughTestMessages:
+		default:
+			close(nodeInfo.enoughTestMessages)
+		}
+	}
+
 	if !hb.Initial {
 		nodeInfo.Detector.Ping(timeReceived)
 	}
-	nodeInfo.nrMessagesReceived.Add(1)
 }
 
-func (nm *NodeWatcherImpl) closeEnoughSamplesChan(nodeInfo NodeInfo) {
-	nm.logger.Infof("Closing enoughSamples chan for peer %s", nodeInfo.peer.String())
-	lat := nodeInfo.LatencyCalc.CurrValue()
-	nm.logger.Infof("Node %s: ConnType: %s PHI: %f, Latency: %d, Subscribers: %d ", nodeInfo.peer.String(), reflect.TypeOf(nodeInfo.peerConn), nodeInfo.Detector.Phi(time.Now()), lat, len(nodeInfo.subscribers))
-	close(nodeInfo.enoughSamples)
-}
 func (nm *NodeWatcherImpl) logWatchingNodes() {
 	nm.watchingLock.RLock()
 	toPrint := ""

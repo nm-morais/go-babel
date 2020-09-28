@@ -127,57 +127,58 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 	case *stream.TCPStream:
 		for {
 			newStream, err := listener.Accept()
-			if err != nil {
-				err.Log(sm.logger)
-				newStream.Close()
-				continue
-			}
-			mr := messageIO.NewMessageReader(newStream)
-			mw := messageIO.NewMessageWriter(newStream)
+			go func() {
+				if err != nil {
+					err.Log(sm.logger)
+					newStream.Close()
+					return
+				}
+				mr := messageIO.NewMessageReader(newStream)
+				mw := messageIO.NewMessageWriter(newStream)
 
-			handshakeMsg, err := sm.waitForHandshakeMessage(mr)
-			if err != nil {
-				err.Log(sm.logger)
-				mr.Close()
-				mw.Close()
-				newStream = nil
+				handshakeMsg, err := sm.waitForHandshakeMessage(mr)
+				if err != nil {
+					err.Log(sm.logger)
+					mr.Close()
+					mw.Close()
+					newStream = nil
+					sm.logStreamManagerState()
+					return
+				}
+				remotePeer := handshakeMsg.Peer
+				//sm.logger.Infof("Got handshake message %+v from peer %s", handshakeMsg, remotePeer.ToString())
+				if handshakeMsg.TunnelType == TemporaryTunnel {
+					go sm.handleTmpStream(remotePeer, mr)
+					return
+				}
+
+				err = sm.sendHandshakeMessage(mw, RegisteredProtos(), PermanentTunnel)
+				if err != nil {
+					sm.logger.Errorf("An error occurred during handshake with %s: %s", remotePeer.String(), err.Reason())
+					sm.inboundTransports.Delete(remotePeer.String())
+					mr.Close()
+					mw.Close()
+					newStream = nil
+					sm.logStreamManagerState()
+					return
+				}
+
+				sm.logger.Warnf("New connection from %s", remotePeer.String())
+
+				sm.inboundTransports.Store(remotePeer.String(), newStream)
+				if !inConnRequested(handshakeMsg.Protos, remotePeer) {
+					mr.Close()
+					mw.Close()
+					newStream = nil
+					sm.inboundTransports.Delete(remotePeer.String())
+					sm.logger.Infof("Peer %s conn was not accepted, closing stream", remotePeer.String())
+					sm.logStreamManagerState()
+					return
+				}
+				sm.logger.Warnf("Accepted connection from %s successfully", remotePeer.String())
 				sm.logStreamManagerState()
-				continue
-			}
-			remotePeer := handshakeMsg.Peer
-			//sm.logger.Infof("Got handshake message %+v from peer %s", handshakeMsg, remotePeer.ToString())
-			if handshakeMsg.TunnelType == TemporaryTunnel {
-				go sm.handleTmpStream(remotePeer, mr)
-				continue
-			}
-
-			err = sm.sendHandshakeMessage(mw, RegisteredProtos(), PermanentTunnel)
-			if err != nil {
-				sm.logger.Errorf("An error occurred during handshake with %s: %s", remotePeer.String(), err.Reason())
-				sm.inboundTransports.Delete(remotePeer.String())
-				mr.Close()
-				mw.Close()
-				newStream = nil
-				sm.logStreamManagerState()
-				continue
-			}
-
-			sm.logger.Warnf("New connection from %s", remotePeer.String())
-
-			sm.inboundTransports.Store(remotePeer.String(), newStream)
-			if !inConnRequested(handshakeMsg.Protos, remotePeer) {
-				mr.Close()
-				mw.Close()
-				newStream = nil
-				sm.inboundTransports.Delete(remotePeer.String())
-				sm.logger.Infof("Peer %s conn was not accepted, closing stream", remotePeer.String())
-				sm.logStreamManagerState()
-				continue
-			}
-
-			go sm.handleInStream(mr, remotePeer)
-			sm.logger.Warnf("Accepted connection from %s successfully", remotePeer.String())
-			sm.logStreamManagerState()
+				go sm.handleInStream(mr, remotePeer)
+			}()
 		}
 	case *stream.UDPStream:
 		for {

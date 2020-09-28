@@ -7,7 +7,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"reflect"
-	"runtime"
 	"runtime/pprof"
 	"sync"
 	"time"
@@ -159,6 +158,35 @@ func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID,
 			return
 		}
 		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
+	}()
+}
+
+func SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) {
+	proto, ok := p.protocols.Load(origin)
+	defer func() {
+		if r := recover(); r != nil {
+			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller))
+		}
+	}()
+
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", origin)
+	}
+	go func() {
+		defer Disconnect(origin, destPeer)
+		//p.logger.Infof("Sending message of type %s", reflect.TypeOf(toSend))
+		msgBytes := p.serializationManager.Serialize(toSend)
+		wrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), origin, destinations, msgBytes)
+		//p.logger.Infof("Sending %s to %s", reflect.TypeOf(toSend), destPeer.ToString())
+		toSendBytes := appMsgSerializer.Serialize(wrapper)
+		// p.logger.Infof("Sending (bytes): %+v", toSendBytes)
+		err := p.streamManager.SendMessage(toSendBytes, destPeer)
+		if err != nil {
+			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
+			return
+		}
+		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
+
 	}()
 }
 
@@ -397,30 +425,25 @@ func Start() {
 	})
 
 	deadline := time.Now().Add(7 * time.Minute)
-	ticker := time.NewTicker(5 * time.Second)
 	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
-	for {
-		select {
-		case <-ticker.C:
-			fmt.Printf("Remaining time until performance metrics:%d\n", time.Until(deadline))
-			fmt.Printf("Nr goroutines=%d\n", runtime.NumGoroutine())
-		case <-time.After(time.Until(deadline)):
-			if p.config.Cpuprofile {
-				pprof.StopCPUProfile()
-			}
-			if p.config.Memprofile {
-				f, err := os.Create(logFolder + "memprofile")
-				if err != nil {
-					log.Fatal(err)
-				}
-				err = pprof.WriteHeapProfile(f)
-				if err != nil {
-					log.Fatal(err)
-				}
-				f.Close()
-			}
-		}
+	<-time.After(time.Until(deadline))
+	if p.config.Cpuprofile {
+		pprof.StopCPUProfile()
 	}
+	if p.config.Memprofile {
+		f, err := os.Create(logFolder + "memprofile")
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = pprof.WriteHeapProfile(f)
+		if err != nil {
+			log.Fatal(err)
+		}
+		f.Close()
+	}
+
+	select {}
+
 }
 
 func setupPerformanceProfiling(doCpuprofile, doMemprofile bool) {

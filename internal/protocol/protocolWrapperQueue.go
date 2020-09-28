@@ -223,7 +223,6 @@ func (pw WrapperProtocol) Init() {
 
 func (pw WrapperProtocol) handleChannels() {
 	for {
-
 		nextEventInterface, err := pw.eventQueue.Get()
 		if err != nil {
 			panic(err)
@@ -262,7 +261,6 @@ func (pw WrapperProtocol) handleChannels() {
 			panic("unregistered id of event")
 		}
 	}
-
 }
 
 // internal handlers
