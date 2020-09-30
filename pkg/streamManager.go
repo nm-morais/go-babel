@@ -308,18 +308,24 @@ func (sm streamManager) SendMessage(message []byte, p peer.Peer) errors.Error {
 	if p == nil {
 		sm.logger.Panic("Peer is nil")
 	}
-
 	outboundStream, ok := sm.outboundTransports.Load(p.String())
 	if !ok {
+		sm.dialingTransportsMutex.Lock()
 		doneDialing, ok := sm.dialingTransports.Load(p.String())
 		if !ok {
-			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
-		}
-		waitChan := doneDialing.(chan interface{})
-		<-waitChan
-		outboundStream, ok = sm.outboundTransports.Load(p.String())
-		if !ok {
-			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+			sm.dialingTransportsMutex.Unlock()
+			outboundStream, ok = sm.outboundTransports.Load(p.String())
+			if !ok {
+				return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+			}
+		} else {
+			sm.dialingTransportsMutex.Unlock()
+			waitChan := doneDialing.(chan interface{})
+			<-waitChan
+			outboundStream, ok = sm.outboundTransports.Load(p.String())
+			if !ok {
+				return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+			}
 		}
 	}
 

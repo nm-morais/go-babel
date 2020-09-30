@@ -370,10 +370,10 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 			nm.watchingLock.RLock()
 			nodeInfo, ok = nm.watching[p.String()]
 			if !ok {
-				nm.watchingLock.RLock()
+				nm.watchingLock.RUnlock()
 				return nil, errors.NonFatalError(500, "peer unwatched in the meantime", nodeWatcherCaller)
 			}
-			nm.watchingLock.RLock()
+			nm.watchingLock.RUnlock()
 
 			nm.logger.Warnf("falling back to TCP")
 			// attempting to connect by TCP
@@ -599,33 +599,33 @@ LOOP:
 		}
 		select {
 		case newItem := <-nm.addCondChan:
-			nm.logger.Infof("Received add condition signal...")
-			nm.logger.Infof("Adding condition %d", newItem.Key)
+			// nm.logger.Infof("Received add condition signal...")
+			// nm.logger.Infof("Adding condition %d", newItem.Key)
 			heap.Push(&nm.conditions, newItem)
 			if nextItem != nil {
-				nm.logger.Infof("nextItem (%d) was not nil, re-adding to condition list", nextItem.Key)
+				// nm.logger.Infof("nextItem (%d) was not nil, re-adding to condition list", nextItem.Key)
 				heap.Push(&nm.conditions, nextItem)
 			}
 			//nm.conditions.LogEntries(nm.logger)
 		case req := <-nm.cancelCondChan:
-			nm.logger.Infof("Received cancel cond signal...")
+			// nm.logger.Infof("Received cancel cond signal...")
 			if req.key == nextItem.Key {
 				req.removed <- req.key
-				nm.logger.Infof("Removed condition %d successfully", req.key)
+				// nm.logger.Infof("Removed condition %d successfully", req.key)
 				continue LOOP
 			}
 
 			heap.Push(&nm.conditions, nextItem)
 			aux := nm.removeCond(req.key)
-			if aux != -1 {
-				nm.logger.Infof("Removed condition %d successfully", req.key)
-			} else {
-				nm.logger.Warnf("Removing condition %d failure: not found", req.key)
-			}
+			// if aux != -1 {
+			// nm.logger.Infof("Removed condition %d successfully", req.key)
+			// } else {
+			// nm.logger.Warnf("Removing condition %d failure: not found", req.key)
+			// }
 			req.removed <- aux
 			//nm.conditions.LogEntries(nm.logger)
 		case <-nextItemTimer.C:
-			nm.logger.Infof("Condition trigger: %+v", *nextItem)
+			// nm.logger.Infof("Condition trigger: %+v", *nextItem)
 			cond := nextItem.Value.(Condition)
 			nm.watchingLock.RLock()
 			nodeStats := nm.watching[cond.Peer.String()]
@@ -633,7 +633,7 @@ LOOP:
 			select {
 			case <-nodeStats.enoughSamples:
 				if cond.CondFunc(nodeStats) {
-					nm.logger.Infof("Condition trigger: %+v", *nextItem)
+					// nm.logger.Infof("Condition trigger: %+v", *nextItem)
 					SendNotification(cond.Notification)
 					if cond.Repeatable {
 						if cond.EnableGracePeriod {
@@ -656,7 +656,7 @@ LOOP:
 }
 
 func (nm *NodeWatcherImpl) removeCond(condId int) int {
-	nm.logger.Infof("Canceling timer with ID %d", condId)
+	// nm.logger.Infof("Canceling timer with ID %d", condId)
 	for idx, entry := range nm.conditions {
 		if entry.Key == condId {
 			heap.Remove(&nm.conditions, idx)
