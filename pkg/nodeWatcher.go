@@ -367,6 +367,14 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Erro
 			return &nm.udpConn, nil
 		case <-time.After(time.Until(udpTestDeadline)):
 
+			nm.watchingLock.RLock()
+			nodeInfo, ok = nm.watching[p.String()]
+			if !ok {
+				nm.watchingLock.RLock()
+				return nil, errors.NonFatalError(500, "peer unwatched in the meantime", nodeWatcherCaller)
+			}
+			nm.watchingLock.RLock()
+
 			nm.logger.Warnf("falling back to TCP")
 			// attempting to connect by TCP
 			rAddrTcp := &net.TCPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
@@ -670,7 +678,11 @@ func (nm *NodeWatcherImpl) printLatencyToPeriodic() {
 		for _, watchedPeer := range nm.watching {
 			select {
 			case <-watchedPeer.enoughSamples:
-				nm.logger.Infof("Node %s: , Conntype: %s, PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.peer.String(), reflect.TypeOf(watchedPeer.peerConn), watchedPeer.Detector.Phi(time.Now()), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
+				if watchedPeer.peerConn == nil {
+					nm.logger.Infof("Node %s: , Conntype: <nil>, PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.peer.String(), watchedPeer.Detector.Phi(time.Now()), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
+				} else {
+					nm.logger.Infof("Node %s: , Conntype: %s, PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.peer.String(), reflect.TypeOf(watchedPeer.peerConn), watchedPeer.Detector.Phi(time.Now()), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
+				}
 			default:
 			}
 		}

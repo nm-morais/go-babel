@@ -273,7 +273,6 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	if err != nil {
 		sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Reason())
 		mr.Close()
-		mw.Close()
 		dialError(dialingProto, toDial)
 		stream.Close()
 		stream = nil
@@ -385,7 +384,7 @@ func (sm streamManager) handleInStream(mr inboundStreamValueType, newPeer peer.P
 func (sm streamManager) waitDial(dialerProto protocol.ID, toDial peer.Peer, waitChan chan interface{}) {
 	<-waitChan
 	proto, _ := p.protocols.Load(dialerProto)
-	_, connUp := sm.inboundTransports.Load(toDial.String())
+	_, connUp := sm.outboundTransports.Load(toDial.String())
 	if !connUp {
 		proto.(protocolValueType).DialFailed(toDial)
 	} else {
