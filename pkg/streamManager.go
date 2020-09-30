@@ -344,10 +344,6 @@ func (sm streamManager) Disconnect(p peer.Peer) {
 		conn.(outboundStreamValueType).Close()
 		sm.outboundTransports.Delete(p.String())
 	}
-	if conn, ok := sm.inboundTransports.Load(p.String()); ok {
-		conn.(inboundStreamValueType).Close()
-		sm.inboundTransports.Delete(p.String())
-	}
 	sm.dialingTransportsMutex.Unlock()
 	sm.logStreamManagerState()
 }
