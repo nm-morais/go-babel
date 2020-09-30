@@ -14,7 +14,7 @@ func Test_serializeHeartbeatMessage(t *testing.T) {
 	bytes := SerializeHeartbeatMessage(test)
 	test2 := DeserializeHeartbeatMessage(bytes)
 
-	if !test.Sender.Equals(test2.Sender) {
+	if !peer.PeersEqual(test.Sender, test2.Sender) {
 		t.Error("Sender does not match")
 		t.Fail()
 	}
@@ -30,7 +30,7 @@ func Test_serializeHeartbeatMessage2(t *testing.T) {
 	t.Logf("%+v", test)
 	t.Logf("%+v", test2)
 
-	if !test.Sender.Equals(test2.Sender) {
+	if !peer.PeersEqual(test.Sender, test2.Sender) {
 		t.Error("Sender does not match")
 		t.FailNow()
 	}

@@ -96,7 +96,7 @@ func (tq *timerQueueImpl) start() {
 
 LOOP:
 	for {
-		tq.logger.Infof("timer queue loop")
+		// tq.logger.Infof("timer queue loop")
 
 		var nextItem *dataStructures.Item
 		var waitTime time.Duration

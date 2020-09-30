@@ -27,8 +27,7 @@ type streamManager struct {
 	outboundTransports *sync.Map
 
 	hbTimers *sync.Map
-
-	logger *log.Logger
+	logger   *log.Logger
 }
 
 var appMsgDeserializer = internalMsg.AppMessageWrapperSerializer{}
@@ -101,7 +100,7 @@ func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial pee
 		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
 		sm.logger.Info("Sending message sideChannel UDP")
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
-		peerBytes := p.config.Peer.SerializeToBinary()
+		peerBytes := p.config.Peer.Marshal()
 		binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(wrappedBytes)))
 		totalMsgBytes := append(msgSizeBytes, wrappedBytes...)
 		_, wErr := s.Write(append(totalMsgBytes, peerBytes...))
@@ -191,8 +190,8 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 
 			msgSize := int(binary.BigEndian.Uint32(msgBuf[:4]))
 			deserialized := deserializer.Deserialize(msgBuf[4 : 4+msgSize])
-			_, sender := peer.DeserializePeer(msgBuf[4+msgSize : n])
-
+			sender := &peer.IPeer{}
+			sender.Unmarshal(msgBuf[4+msgSize : n])
 			protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
 			for _, toNotifyID := range protoMsg.DestProtos {
 				if toNotify, ok := p.protocols.Load(toNotifyID); ok {
@@ -306,20 +305,20 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	sm.logStreamManagerState()
 }
 
-func (sm streamManager) SendMessage(message []byte, peer peer.Peer) errors.Error {
-	if peer == nil {
+func (sm streamManager) SendMessage(message []byte, p peer.Peer) errors.Error {
+	if p == nil {
 		sm.logger.Panic("Peer is nil")
 	}
 
-	outboundStream, ok := sm.outboundTransports.Load(peer.String())
+	outboundStream, ok := sm.outboundTransports.Load(p.String())
 	if !ok {
-		doneDialing, ok := sm.dialingTransports.Load(peer.String())
+		doneDialing, ok := sm.dialingTransports.Load(p.String())
 		if !ok {
 			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
 		}
 		waitChan := doneDialing.(chan interface{})
 		<-waitChan
-		outboundStream, ok = sm.outboundTransports.Load(peer.String())
+		outboundStream, ok = sm.outboundTransports.Load(p.String())
 		if !ok {
 			return errors.NonFatalError(404, "stream not found", streamManagerCaller)
 		}
@@ -328,21 +327,21 @@ func (sm streamManager) SendMessage(message []byte, peer peer.Peer) errors.Error
 	_, err := outboundStream.(outboundStreamValueType).Write(message)
 	if err != nil {
 		sm.logger.Error(err)
-		sm.handleOutboundTransportFailure(peer)
+		sm.handleOutboundTransportFailure(p)
 	}
 	return nil
 }
 
-func (sm streamManager) Disconnect(peer peer.Peer) {
-	sm.logger.Warnf("[ConnectionEvent] : Disconnecting from %s", peer.String())
+func (sm streamManager) Disconnect(p peer.Peer) {
+	sm.logger.Warnf("[ConnectionEvent] : Disconnecting from %s", p.String())
 	sm.dialingTransportsMutex.Lock()
-	if conn, ok := sm.outboundTransports.Load(peer.String()); ok {
+	if conn, ok := sm.outboundTransports.Load(p.String()); ok {
 		conn.(outboundStreamValueType).Close()
-		sm.outboundTransports.Delete(peer.String())
+		sm.outboundTransports.Delete(p.String())
 	}
-	if conn, ok := sm.inboundTransports.Load(peer.String()); ok {
+	if conn, ok := sm.inboundTransports.Load(p.String()); ok {
 		conn.(inboundStreamValueType).Close()
-		sm.inboundTransports.Delete(peer.String())
+		sm.inboundTransports.Delete(p.String())
 	}
 	sm.dialingTransportsMutex.Unlock()
 	sm.logStreamManagerState()

@@ -80,15 +80,16 @@ const protoID = 1000
 const name = "PingPong"
 
 type PingPongProtocol struct {
-	activePeers map[peer.Peer]bool
+	activePeers map[string]peer.Peer
 	contact     peer.Peer
 	logger      *logrus.Logger
 }
 
 func NewPingPongProtocol(contact peer.Peer) protocol.Protocol {
 	return &PingPongProtocol{
-		contact: contact,
-		logger:  logs.NewLogger(name),
+		contact:     contact,
+		activePeers: make(map[string]peer.Peer),
+		logger:      logs.NewLogger(name),
 	}
 }
 
@@ -113,14 +114,14 @@ func (m *PingPongProtocol) Logger() *logrus.Logger {
 }
 
 func (m *PingPongProtocol) Init() {
-	m.activePeers = make(map[peer.Peer]bool)
+	m.activePeers = make(map[string]peer.Peer)
 	pkg.RegisterMessageHandler(protoID, Ping{}, m.handlePingMessage)
 	pkg.RegisterMessageHandler(protoID, Pong{}, m.handlePongMessage)
 	pkg.RegisterTimerHandler(protoID, PingTimer{}.ID(), m.handlePingTimer)
 }
 
 func (m *PingPongProtocol) Start() {
-	if !pkg.SelfPeer().Equals(m.contact) {
+	if !peer.PeersEqual(pkg.SelfPeer(), m.contact) {
 		m.logger.Infof("Dialing contact node")
 		pkg.Dial(m.contact, protoID, stream.NewTCPDialer())
 	} else {
@@ -128,9 +129,9 @@ func (m *PingPongProtocol) Start() {
 	}
 }
 
-func (m *PingPongProtocol) DialFailed(peer peer.Peer) {
+func (m *PingPongProtocol) DialFailed(p peer.Peer) {
 	m.logger.Infof("Dial failed")
-	if peer.Equals(m.contact) {
+	if peer.PeersEqual(m.contact, p) {
 		panic("contacting bootstrap node failed")
 	}
 }
@@ -156,7 +157,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 		return
 	}
 
-	for remotePeer := range m.activePeers {
+	for _, remotePeer := range m.activePeers {
 		m.logger.Infof("Sending pingMessage to %s", remotePeer.String())
 		//pkg.Write(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		for i := 0; i < 1; i++ {
@@ -170,7 +171,7 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	m.logger.Infof("Connection established to peer %+v", peer.String())
 	if sourceProto == protoID {
-		m.activePeers[peer] = true
+		m.activePeers[peer.String()] = peer
 		pkg.RegisterTimer(protoID, PingTimer{deadline: time.Now().Add(0 * time.Second)})
 		return true
 	}
@@ -182,5 +183,5 @@ func (m *PingPongProtocol) InConnRequested(peer peer.Peer) bool {
 }
 
 func (m *PingPongProtocol) OutConnDown(peer peer.Peer) {
-	delete(m.activePeers, peer)
+	delete(m.activePeers, peer.String())
 }

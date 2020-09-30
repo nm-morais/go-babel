@@ -51,7 +51,7 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []
 		binary.BigEndian.PutUint16(buf[bufPos:], protoID)
 		bufPos += 2
 	}
-	toSend := append(buf, protoMsg.Peer.SerializeToBinary()...)
+	toSend := append(buf, protoMsg.Peer.Marshal()...)
 	return toSend
 }
 
@@ -67,7 +67,8 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 		newMsg.Protos[i] = binary.BigEndian.Uint16(buf[bufPos:])
 		bufPos += 2
 	}
-	_, peer := peer.DeserializePeer(buf[bufPos:])
-	newMsg.Peer = peer
+	p := &peer.IPeer{}
+	p.Unmarshal(buf[bufPos:])
+	newMsg.Peer = p
 	return newMsg
 }

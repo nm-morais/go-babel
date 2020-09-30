@@ -35,7 +35,7 @@ func NewHBMessageForceReply(sender peer.Peer, initial bool) HeartbeatMessage {
 }
 
 func SerializeHeartbeatMessage(m HeartbeatMessage) []byte {
-	peerBytes := m.Sender.SerializeToBinary()
+	peerBytes := m.Sender.Marshal()
 
 	if m.IsReply {
 		peerBytes = append(peerBytes, byte(1))
@@ -65,15 +65,12 @@ func SerializeHeartbeatMessage(m HeartbeatMessage) []byte {
 
 func DeserializeHeartbeatMessage(bytes []byte) HeartbeatMessage {
 	currPos := 0
-	peerSize, p := peer.DeserializePeer(bytes[currPos:])
-	currPos += peerSize
-
+	p := &peer.IPeer{}
+	currPos += p.Unmarshal(bytes[currPos:])
 	isReply := bytes[currPos] == 1
 	currPos++
-
 	forceReply := bytes[currPos] == 1
 	currPos++
-
 	initial := bytes[currPos] == 1
 	currPos++
 

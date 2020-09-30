@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/nm-morais/go-babel/pkg/message"
-	"github.com/nm-morais/go-babel/pkg/peer"
+	. "github.com/nm-morais/go-babel/pkg/peer"
 )
 
 const JoinMessageType = 2000
@@ -39,7 +39,7 @@ const ForwardJoinMessageType = 2002
 
 type ForwardJoinMessage struct {
 	TTL            uint32
-	OriginalSender peer.Peer
+	OriginalSender Peer
 }
 type forwardJoinMessageSerializer struct{}
 
@@ -54,12 +54,13 @@ func (forwardJoinMessageSerializer) Serialize(msg message.Message) []byte {
 	converted := msg.(ForwardJoinMessage)
 	ttlBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(ttlBytes, converted.TTL)
-	return append(ttlBytes, converted.OriginalSender.SerializeToBinary()...)
+	return append(ttlBytes, converted.OriginalSender.Marshal()...)
 }
 
 func (forwardJoinMessageSerializer) Deserialize(msgBytes []byte) message.Message {
 	ttl := binary.BigEndian.Uint32(msgBytes[0:4])
-	_, p := peer.DeserializePeer(msgBytes[4:])
+	p := &IPeer{}
+	p.Unmarshal(msgBytes[4:])
 	return ForwardJoinMessage{
 		TTL:            ttl,
 		OriginalSender: p,
@@ -137,7 +138,7 @@ const ShuffleMessageType = 2005
 type ShuffleMessage struct {
 	ID    uint32
 	TTL   uint32
-	Peers []peer.Peer
+	Peers []Peer
 }
 type ShuffleMessageSerializer struct{}
 
@@ -155,14 +156,14 @@ func (ShuffleMessageSerializer) Serialize(msg message.Message) []byte {
 	shuffleMsg := msg.(ShuffleMessage)
 	binary.BigEndian.PutUint32(msgBytes[0:4], shuffleMsg.ID)
 	binary.BigEndian.PutUint32(msgBytes[4:8], shuffleMsg.TTL)
-	peer.SerializePeerArray(shuffleMsg.Peers)
+	SerializePeerArray(shuffleMsg.Peers)
 	return msgBytes
 }
 
 func (ShuffleMessageSerializer) Deserialize(msgBytes []byte) message.Message {
 	id := binary.BigEndian.Uint32(msgBytes[0:4])
 	ttl := binary.BigEndian.Uint32(msgBytes[4:8])
-	_, hosts := peer.DeserializePeerArray(msgBytes[8:])
+	_, hosts := DeserializePeerArray(msgBytes[8:])
 	return ShuffleMessage{
 		ID:    id,
 		TTL:   ttl,
@@ -174,7 +175,7 @@ const ShuffleReplyMessageType = 2006
 
 type ShuffleReplyMessage struct {
 	ID    uint32
-	Peers []peer.Peer
+	Peers []Peer
 }
 type ShuffleReplyMessageSerializer struct{}
 
@@ -191,12 +192,12 @@ func (ShuffleReplyMessageSerializer) Serialize(msg message.Message) []byte {
 	msgBytes := make([]byte, 8)
 	shuffleMsg := msg.(ShuffleReplyMessage)
 	binary.BigEndian.PutUint32(msgBytes[0:4], shuffleMsg.ID)
-	return append(msgBytes, peer.SerializePeerArray(shuffleMsg.Peers)...)
+	return append(msgBytes, SerializePeerArray(shuffleMsg.Peers)...)
 }
 
 func (ShuffleReplyMessageSerializer) Deserialize(msgBytes []byte) message.Message {
 	id := binary.BigEndian.Uint32(msgBytes[0:4])
-	_, hosts := peer.DeserializePeerArray(msgBytes[4:])
+	_, hosts := DeserializePeerArray(msgBytes[4:])
 	return ShuffleReplyMessage{
 		ID:    id,
 		Peers: hosts,

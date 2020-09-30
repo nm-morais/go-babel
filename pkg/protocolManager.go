@@ -20,7 +20,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/notification"
-	"github.com/nm-morais/go-babel/pkg/peer"
+	. "github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/request"
 	"github.com/nm-morais/go-babel/pkg/stream"
@@ -36,7 +36,7 @@ type ProtocolManagerConfig struct {
 	LogFolder        string
 	HandshakeTimeout time.Duration
 	DialTimeout      time.Duration
-	Peer             peer.Peer
+	Peer             Peer
 }
 
 type protocolValueType = internalProto.WrapperProtocol
@@ -134,7 +134,7 @@ func RegisterMessageHandler(protoID protocol.ID, message message.Message, handle
 	return nil
 }
 
-func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) {
+func SendMessage(toSend message.Message, destPeer Peer, origin protocol.ID, destinations []protocol.ID) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {
@@ -161,7 +161,7 @@ func SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID,
 	}()
 }
 
-func SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destinations []protocol.ID) {
+func SendMessageAndDisconnect(toSend message.Message, destPeer Peer, origin protocol.ID, destinations []protocol.ID) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {
@@ -225,7 +225,7 @@ func GetNodeWatcher() NodeWatcher {
 	return p.nodeWatcher
 }
 
-func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
+func SendMessageSideStream(toSend message.Message, targetPeer Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
 	callerProto, ok := p.protocols.Load(sourceProtoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", sourceProtoID)
@@ -241,30 +241,30 @@ func SendMessageSideStream(toSend message.Message, targetPeer peer.Peer, sourceP
 
 }
 
-func Dial(toDial peer.Peer, sourceProtoID protocol.ID, t stream.Stream) {
+func Dial(toDial Peer, sourceProtoID protocol.ID, t stream.Stream) {
 	p.logger.Warnf("Dialing new node %s", toDial.String())
 	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
 }
 
-func Disconnect(source protocol.ID, peer peer.Peer) {
+func Disconnect(source protocol.ID, toDc Peer) {
 	go func() {
-		p.logger.Warnf("Proto %d disconnecting from peer %s", source, peer.String())
+		p.logger.Warnf("Proto %d disconnecting from peer %s", source, toDc.String())
 		p.channelSubscribersMutex.Lock()
-		subs := p.channelSubscribers[peer.String()]
+		subs := p.channelSubscribers[toDc.String()]
 		delete(subs, source)
 		p.channelSubscribersMutex.Unlock()
 		if len(subs) == 0 {
-			p.logger.Warnf("Disconnecting from %s", peer.String())
-			p.streamManager.Disconnect(peer)
+			p.logger.Warnf("Disconnecting from %s", toDc.String())
+			p.streamManager.Disconnect(toDc)
 		}
 	}()
 }
 
-func SelfPeer() peer.Peer {
+func SelfPeer() Peer {
 	return p.config.Peer
 }
 
-func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
+func inConnRequested(remoteProtos []protocol.ID, dialer Peer) bool {
 	p.channelSubscribersMutex.Lock()
 	subs := p.channelSubscribers[dialer.String()]
 	if subs == nil {
@@ -287,7 +287,7 @@ func inConnRequested(remoteProtos []protocol.ID, dialer peer.Peer) bool {
 	return true
 }
 
-func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
+func dialError(sourceProto protocol.ID, dialedPeer Peer) {
 	callerProto, ok := p.protocols.Load(sourceProto)
 	if !ok {
 		p.logger.Panicf("Proto %d not found", sourceProto)
@@ -295,7 +295,7 @@ func dialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
 	callerProto.(protocolValueType).DialFailed(dialedPeer)
 }
 
-func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer peer.Peer) bool {
+func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer Peer) bool {
 	p.channelSubscribersMutex.Lock()
 	subs := p.channelSubscribers[dialedPeer.String()]
 	if subs == nil {
@@ -323,7 +323,7 @@ func dialSuccess(dialerProto protocol.ID, remoteProtos []protocol.ID, dialedPeer
 
 }
 
-func outTransportFailure(peer peer.Peer) {
+func outTransportFailure(peer Peer) {
 	p.logger.Warn("Handling transport failure from ", peer.String())
 	p.channelSubscribersMutex.Lock()
 	toNotify := p.channelSubscribers[peer.String()]

@@ -18,6 +18,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
+	. "github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -101,7 +102,7 @@ type NodeWatcher interface {
 	Logger() *logrus.Logger
 }
 
-func NewNodeWatcher(selfPeer peer.Peer, config NodeWatcherConf) NodeWatcher {
+func NewNodeWatcher(selfPeer Peer, config NodeWatcherConf) NodeWatcher {
 	nm := &NodeWatcherImpl{
 		conf:           config,
 		selfPeer:       selfPeer,
@@ -153,7 +154,7 @@ func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, p peer.Peer) {
 }
 
 func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Error {
-	if p == nil {
+	if reflect.ValueOf(p).IsNil() {
 		panic("Tried to watch nil peer")
 	}
 	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.String())
@@ -179,7 +180,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 
 func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto protocol.ID, latency time.Duration) errors.Error {
 	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.String(), latency)
-	if p == nil {
+	if reflect.ValueOf(p).IsNil() {
 		panic("Tried to watch nil peer")
 	}
 	nm.watchingLock.Lock()
@@ -255,14 +256,14 @@ func (nm *NodeWatcherImpl) startHbRoutine(p peer.Peer) {
 		switch nodeInfo.peerConn.(type) {
 		case net.PacketConn:
 			//nm.logger.Infof("sending hb message:%+v", toSend)
-			//nm.logger.Infof("Sent HB to %s via UDP", nodeInfo.peer.ToString())
+			//nm.logger.Infof("Sent HB to %s via UDP", nodeInfo.*peer.ToString())
 			_, err := nm.udpConn.WriteTo(analytics.SerializeHeartbeatMessage(toSend), rAddr)
 			if err != nil {
 				panic("err in udp conn")
 			}
 
 		case net.Conn:
-			//nm.logger.Infof("Sent HB to %s via TCP", nodeInfo.peer.ToString())
+			//nm.logger.Infof("Sent HB to %s via TCP", nodeInfo.*peer.ToString())
 			_, err := nodeInfo.mw.Write(analytics.SerializeHeartbeatMessage(toSend))
 			if err != nil {
 				return
@@ -271,7 +272,7 @@ func (nm *NodeWatcherImpl) startHbRoutine(p peer.Peer) {
 	}
 }
 
-func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error {
+func (nm *NodeWatcherImpl) Unwatch(peer Peer, protoID protocol.ID) errors.Error {
 	nm.logger.Infof("Proto %d request to unwatch %s", protoID, peer.String())
 	nm.watchingLock.Lock()
 	watchedPeer, ok := nm.watching[peer.String()]
@@ -544,7 +545,7 @@ func (nm *NodeWatcherImpl) logWatchingNodes() {
 	nm.watchingLock.RLock()
 	toPrint := ""
 	for _, watchedNode := range nm.watching {
-		toPrint = toPrint + "; " + watchedNode.peer.String()
+		toPrint = toPrint + "; " + watchedNode.peer.String() + ":" + watchedNode.LatencyCalc.CurrValue().String()
 	}
 	nm.logger.Infof("Watching peers: %s:", toPrint)
 	nm.watchingLock.RUnlock()
@@ -563,7 +564,7 @@ func (nm *NodeWatcherImpl) CancelCond(condID int) errors.Error {
 
 func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
 	condId := rand.Int()
-	if c.Peer == nil {
+	if reflect.ValueOf(c.Peer).IsNil() {
 		nm.logger.Panic("peer to notify is nil")
 	}
 	conditionsItem := &dataStructures.Item{
@@ -669,7 +670,7 @@ func (nm *NodeWatcherImpl) printLatencyToPeriodic() {
 		for _, watchedPeer := range nm.watching {
 			select {
 			case <-watchedPeer.enoughSamples:
-				nm.logger.Infof("Node %s: ConnType: %s PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.peer.String(), reflect.TypeOf(watchedPeer.peerConn), watchedPeer.Detector.Phi(time.Now()), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
+				nm.logger.Infof("Node %s: , Conntype: %s, PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.peer.String(), reflect.TypeOf(watchedPeer.peerConn), watchedPeer.Detector.Phi(time.Now()), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
 			default:
 			}
 		}

@@ -4,43 +4,44 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"reflect"
 )
 
 type Peer interface {
 	IP() net.IP
 	ProtosPort() uint16
 	AnalyticsPort() uint16
-	Equals(other Peer) bool
-	SerializeToBinary() []byte
 	String() string
+	Marshal() []byte
+	Unmarshal([]byte) int
 }
 
-type peer struct {
+type IPeer struct {
 	ip            net.IP
 	protosPort    uint16
 	analyticsPort uint16
 }
 
-func NewPeer(ip net.IP, protosPort uint16, analyticsPort uint16) Peer {
-	return &peer{
+func NewPeer(ip net.IP, protosPort uint16, analyticsPort uint16) *IPeer {
+	return &IPeer{
 		ip:            ip,
 		protosPort:    protosPort,
 		analyticsPort: analyticsPort,
 	}
 }
-func (p *peer) IP() net.IP {
+func (p *IPeer) IP() net.IP {
 	return p.ip
 }
 
-func (p *peer) ProtosPort() uint16 {
+func (p *IPeer) ProtosPort() uint16 {
 	return p.protosPort
 }
 
-func (p *peer) AnalyticsPort() uint16 {
+func (p *IPeer) AnalyticsPort() uint16 {
 	return p.analyticsPort
 }
 
-func (p *peer) String() string {
+func (p *IPeer) String() string {
 
 	if p == nil {
 		return "<nil>"
@@ -49,20 +50,20 @@ func (p *peer) String() string {
 	return fmt.Sprintf("%s:%d", p.ip, p.protosPort)
 }
 
-func (p *peer) Equals(otherPeer Peer) bool {
+func PeersEqual(p1 Peer, p2 Peer) bool {
 
-	if p == nil {
+	if reflect.ValueOf(p1).IsZero() {
 		return false
 	}
 
-	if otherPeer == nil {
+	if reflect.ValueOf(p2).IsZero() {
 		return false
 	}
 
-	return p.String() == otherPeer.String()
+	return p1.IP().Equal(p2.IP()) && p1.AnalyticsPort() == p2.AnalyticsPort() && p1.ProtosPort() == p2.ProtosPort()
 }
 
-func (p peer) SerializeToBinary() []byte {
+func (p *IPeer) Marshal() []byte {
 	peerBytes := make([]byte, 8)
 	for idx, b := range p.IP().To4() {
 		peerBytes[idx] = b
@@ -72,16 +73,19 @@ func (p peer) SerializeToBinary() []byte {
 	return peerBytes
 }
 
-func DeserializePeer(buf []byte) (int, Peer) {
-	peer := NewPeer(buf[0:4], binary.BigEndian.Uint16(buf[4:6]), binary.BigEndian.Uint16(buf[6:8]))
-	return 8, peer
+func (p *IPeer) Unmarshal(buf []byte) int {
+
+	p.ip = buf[0:4]
+	p.protosPort = binary.BigEndian.Uint16(buf[4:6])
+	p.analyticsPort = binary.BigEndian.Uint16(buf[6:8])
+	return 8
 }
 
 func SerializePeerArray(peers []Peer) []byte {
 	totalBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(totalBytes, uint32(len(peers)))
 	for _, p := range peers {
-		totalBytes = append(totalBytes, p.SerializeToBinary()...)
+		totalBytes = append(totalBytes, p.Marshal()...)
 	}
 	return totalBytes
 }
@@ -91,9 +95,9 @@ func DeserializePeerArray(buf []byte) (int, []Peer) {
 	peers := make([]Peer, nrPeers)
 	bufPos := 4
 	for i := 0; i < nrPeers; i++ {
-		read, peer := DeserializePeer(buf[bufPos:])
-		peers[i] = peer
-		bufPos += read
+		p := &IPeer{}
+		bufPos += p.Unmarshal(buf[bufPos:])
+		peers[i] = p
 	}
 	return bufPos, peers
 }
