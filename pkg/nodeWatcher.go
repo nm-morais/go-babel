@@ -540,6 +540,13 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 }
 
 func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage, nodeInfo NodeInfo) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			nm.logger.Error("Recovered in f", r)
+		}
+	}()
+
 	if !hb.Initial {
 		nodeInfo.Detector.Heartbeat()
 	}
