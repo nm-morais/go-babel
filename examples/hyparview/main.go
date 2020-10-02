@@ -75,7 +75,6 @@ func main() {
 	nodeWatcherConf := pkg.NodeWatcherConf{
 		MaxRedials:              3,
 		HbTickDuration:          1 * time.Second,
-		MinSamplesFaultDetector: 5,
 		NewLatencyWeight:        0.1,
 		NrTestMessagesToSend:    3,
 		NrTestMessagesToReceive: 1,
