@@ -268,7 +268,7 @@ func (pw WrapperProtocol) handleChannels() {
 func (pw WrapperProtocol) handleNotification(notification notification.Notification) {
 	handler, ok := pw.notificationHandlers[notification.ID()]
 	if !ok {
-		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+		panic("notification handler not found")
 	}
 	handler(notification)
 }
@@ -276,7 +276,7 @@ func (pw WrapperProtocol) handleNotification(notification notification.Notificat
 func (pw WrapperProtocol) handleTimer(timer timer.Timer) {
 	handler, ok := pw.timerHandlers[timer.ID()]
 	if !ok {
-		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+		panic("timer handler not found")
 	}
 	handler(timer)
 }
@@ -284,7 +284,7 @@ func (pw WrapperProtocol) handleTimer(timer timer.Timer) {
 func (pw WrapperProtocol) handleReply(reply request.Reply) {
 	handler, ok := pw.requestHandlers[reply.ID()]
 	if !ok {
-		panic(errors.FatalError(404, "reply handler not found", string(pw.wrappedProtocol.ID())))
+		panic("reply handler not found")
 	}
 	handler(reply)
 }
@@ -292,7 +292,7 @@ func (pw WrapperProtocol) handleReply(reply request.Reply) {
 func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
-		panic(errors.FatalError(404, "receivedMsg handler not found", string(pw.wrappedProtocol.ID())))
+		panic("message handler not found")
 	}
 	handler(peer, receivedMsg)
 }

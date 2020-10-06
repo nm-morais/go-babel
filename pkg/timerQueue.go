@@ -60,13 +60,13 @@ func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) in
 		Key:      newTimerId,
 		Priority: timer.Deadline().UnixNano(),
 	}
-	tq.logger.Infof("Adding timer with ID %d", newTimerId)
+	// tq.logger.Infof("Adding timer with ID %d", newTimerId)
 	tq.addTimerChan <- pqItem
 	return newTimerId
 }
 
 func (tq *timerQueueImpl) removeItem(timerID int) int {
-	tq.logger.Infof("Canceling timer with ID %d", timerID)
+	// tq.logger.Infof("Canceling timer with ID %d", timerID)
 	for idx, entry := range tq.pq {
 		if entry.Key == timerID {
 			heap.Remove(&tq.pq, idx)
@@ -113,6 +113,11 @@ LOOP:
 		select {
 		case req := <-tq.cancelTimerChan:
 			// tq.logger.Infof("Received cancel timer signal...")
+			if nextItem == nil {
+				req.removed <- -1
+				continue LOOP
+			}
+
 			if req.key == nextItem.Key {
 				req.removed <- req.key
 				// tq.logger.Infof("Removed timer %d successfully", req.key)
