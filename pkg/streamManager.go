@@ -354,7 +354,7 @@ func (sm streamManager) handleInStream(mr inboundStreamValueType, newPeer peer.P
 
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
-		msgBuf := make([]byte, 2048)
+		msgBuf := make([]byte, 4096)
 		n, err := mr.Read(msgBuf)
 		if err != nil {
 			if err == io.EOF {

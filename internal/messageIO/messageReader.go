@@ -31,9 +31,6 @@ func (a *messageReader) Read(msgBytes []byte) (int, error) {
 		return 0, err
 	}
 	msgSize := int(binary.BigEndian.Uint32(msgSizeBytes))
-	if len(msgBytes) < msgSize {
-		msgBytes = append(msgBytes, make([]byte, msgSize-len(msgBytes))...)
-	}
 	return io.ReadFull(a.stream, msgBytes[:msgSize])
 
 	/*
