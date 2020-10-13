@@ -15,19 +15,36 @@ import (
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"github.com/nm-morais/go-babel/pkg/stream"
 	log "github.com/sirupsen/logrus"
 )
 
+var (
+	encoderConfig = messageIO.EncoderConfig{
+		ByteOrder:                       binary.BigEndian,
+		LengthFieldLength:               4,
+		LengthAdjustment:                0,
+		LengthIncludesLengthFieldLength: false,
+	}
+
+	decoderConfig = messageIO.DecoderConfig{
+		ByteOrder:           binary.BigEndian,
+		LengthFieldOffset:   0,
+		LengthFieldLength:   4,
+		LengthAdjustment:    0,
+		InitialBytesToStrip: 4,
+	}
+)
+
 type streamManager struct {
+	udpConn *net.UDPConn
+
 	dialingTransports      *sync.Map
 	dialingTransportsMutex *sync.Mutex
 
 	inboundTransports  *sync.Map
 	outboundTransports *sync.Map
 
-	hbTimers *sync.Map
-	logger   *log.Logger
+	logger *log.Logger
 }
 
 var appMsgDeserializer = internalMsg.AppMessageWrapperSerializer{}
@@ -37,13 +54,10 @@ const (
 	PermanentTunnel = 1
 )
 
-type inboundStreamValueType = io.ReadCloser
-type outboundStreamValueType = io.WriteCloser
-
 type StreamManager interface {
-	AcceptConnectionsAndNotify(listener stream.Stream)
-	DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, stream stream.Stream)
-	SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, stream stream.Stream) errors.Error
+	AcceptConnectionsAndNotify(listenAddr net.Addr)
+	DialAndNotify(dialingProto protocol.ID, peer peer.Peer, toDial net.Addr)
+	SendMessageSideStream(toSend message.Message, peer peer.Peer, addr net.Addr, sourceProtoID protocol.ID, destProtos []protocol.ID) errors.Error
 	Disconnect(peer peer.Peer)
 	SendMessage(message []byte, peer peer.Peer) errors.Error
 	Logger() *log.Logger
@@ -52,8 +66,8 @@ type StreamManager interface {
 const streamManagerCaller = "StreamManager"
 
 func NewStreamManager() StreamManager {
-	sm := streamManager{
-		hbTimers:               &sync.Map{},
+	sm := &streamManager{
+		udpConn:                &net.UDPConn{},
 		dialingTransports:      &sync.Map{},
 		dialingTransportsMutex: &sync.Mutex{},
 		inboundTransports:      &sync.Map{},
@@ -63,136 +77,118 @@ func NewStreamManager() StreamManager {
 	return sm
 }
 
-func (sm streamManager) Logger() *log.Logger {
+func (sm *streamManager) Logger() *log.Logger {
 	return sm.logger
 }
 
-func (sm streamManager) SendMessageSideStream(toSend message.Message, toDial peer.Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, s stream.Stream) errors.Error {
-	switch s.(type) {
-	case *stream.TCPStream:
-		if err := s.Dial(&net.TCPAddr{IP: toDial.IP(), Port: int(toDial.ProtosPort())}); err != nil {
-			return err
-		}
-		defer s.Close()
-		mw := messageIO.NewMessageWriter(s)
-		err := sm.sendHandshakeMessage(mw, destProtos, TemporaryTunnel)
-		if err != nil {
-			return err
-		}
+func (sm *streamManager) SendMessageSideStream(toSend message.Message, peer peer.Peer, rAddrInt net.Addr, sourceProtoID protocol.ID, destProtos []protocol.ID) errors.Error {
+	switch rAddr := rAddrInt.(type) {
+	case *net.UDPAddr:
 		msgBytes := toSend.Serializer().Serialize(toSend)
 		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
-		sm.logger.Info("Sending message sideChannel TCP")
-		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
-		_, wErr := mw.Write(wrappedBytes)
-		if wErr != nil {
-			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
-		}
-		return nil
-
-	case *stream.UDPStream:
-		if err := s.Dial(&net.UDPAddr{IP: toDial.IP(), Port: int(toDial.ProtosPort())}); err != nil {
-			return err
-		}
-		defer s.Close()
-
-		msgSizeBytes := make([]byte, 4)
-		msgBytes := toSend.Serializer().Serialize(toSend)
-		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
-		sm.logger.Info("Sending message sideChannel UDP")
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
 		peerBytes := p.config.Peer.Marshal()
-		binary.BigEndian.PutUint32(msgSizeBytes, uint32(len(wrappedBytes)))
-		totalMsgBytes := append(msgSizeBytes, wrappedBytes...)
-		_, wErr := s.Write(append(totalMsgBytes, peerBytes...))
+		_, wErr := sm.udpConn.WriteToUDP(append(peerBytes, wrappedBytes...), rAddr)
 		if wErr != nil {
 			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
-		return nil
+	case *net.TCPAddr:
+		tcpStream, err := net.Dial(rAddr.Network(), rAddr.String())
+		if err != nil {
+			return errors.NonFatalError(500, err.Error(), streamManagerCaller)
+		}
+		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, tcpStream)
+		hErr := sm.sendHandshakeMessage(frameBasedConn, sourceProtoID, destProtos, TemporaryTunnel)
+		if hErr != nil {
+			return hErr
+		}
+		msgBytes := toSend.Serializer().Serialize(toSend)
+		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProtos, msgBytes)
+		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
+		wErr := frameBasedConn.WriteFrame(wrappedBytes)
+		if wErr != nil {
+			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+		}
+		tcpStream.Close()
 	default:
-		log.Panicf("Unknown stream type %s", reflect.TypeOf(s))
+		log.Panicf("Unknown addr type %s", reflect.TypeOf(rAddr))
 	}
 	return nil
 }
 
-func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
-	deserializer := internalMsg.AppMessageWrapperSerializer{}
-	sm.logger.Infof("Starting listener of type %s", reflect.TypeOf(s))
-	listener, err := s.Listen()
-	if err != nil {
-		panic(err.Reason())
-	}
-	sm.logger.Infof("Done starting listener %s", reflect.TypeOf(s))
-	switch s.(type) {
-	case *stream.TCPStream:
+func (sm *streamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) {
+	sm.logger.Infof("Starting listener of type %s", lAddrInt.Network())
+	switch lAddr := lAddrInt.(type) {
+	case *net.TCPAddr:
+		listener, err := net.ListenTCP(lAddr.Network(), lAddr)
+		if err != nil {
+			panic(err)
+		}
 		for {
 			newStream, err := listener.Accept()
+			if err != nil {
+				panic(err)
+			}
 			go func() {
+				frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStream)
+				handshakeMsg, err := sm.waitForHandshakeMessage(frameBasedConn)
 				if err != nil {
 					err.Log(sm.logger)
-					newStream.Close()
-					return
-				}
-				mr := messageIO.NewMessageReader(newStream)
-				mw := messageIO.NewMessageWriter(newStream)
-
-				handshakeMsg, err := sm.waitForHandshakeMessage(mr)
-				if err != nil {
-					err.Log(sm.logger)
-					mr.Close()
-					mw.Close()
-					newStream = nil
+					frameBasedConn.Close()
 					sm.logStreamManagerState()
 					return
 				}
 				remotePeer := handshakeMsg.Peer
 				//sm.logger.Infof("Got handshake message %+v from peer %s", handshakeMsg, remotePeer.ToString())
 				if handshakeMsg.TunnelType == TemporaryTunnel {
-					go sm.handleTmpStream(remotePeer, mr)
-					return
-				}
-
-				err = sm.sendHandshakeMessage(mw, RegisteredProtos(), PermanentTunnel)
-				if err != nil {
-					sm.logger.Errorf("An error occurred during handshake with %s: %s", remotePeer.String(), err.Reason())
-					sm.inboundTransports.Delete(remotePeer.String())
-					mr.Close()
-					mw.Close()
-					newStream = nil
-					sm.logStreamManagerState()
+					go sm.handleTmpStream(remotePeer, frameBasedConn)
 					return
 				}
 
 				sm.logger.Warnf("New connection from %s", remotePeer.String())
-
-				sm.inboundTransports.Store(remotePeer.String(), newStream)
-				if !inConnRequested(handshakeMsg.Protos, remotePeer) {
-					mr.Close()
-					mw.Close()
-					newStream = nil
+				acceptedProtos := inConnRequested(handshakeMsg.DialerProto, handshakeMsg.Protos, remotePeer)
+				if len(acceptedProtos) == 0 {
+					frameBasedConn.Close()
 					sm.inboundTransports.Delete(remotePeer.String())
 					sm.logger.Infof("Peer %s conn was not accepted, closing stream", remotePeer.String())
 					sm.logStreamManagerState()
 					return
 				}
+
+				err = sm.sendHandshakeMessage(frameBasedConn, 0, acceptedProtos, PermanentTunnel)
+				if err != nil {
+					sm.logger.Errorf("An error occurred during handshake with %s: %s", remotePeer.String(), err.Reason())
+					sm.inboundTransports.Delete(remotePeer.String())
+					frameBasedConn.Close()
+					sm.logStreamManagerState()
+					return
+				}
 				sm.logger.Warnf("Accepted connection from %s successfully", remotePeer.String())
 				sm.logStreamManagerState()
-				go sm.handleInStream(mr, remotePeer)
+				sm.inboundTransports.Store(remotePeer.String(), newStream)
+				go sm.handleInStream(frameBasedConn, remotePeer)
 			}()
 		}
-	case *stream.UDPStream:
+	case *net.UDPAddr:
+		deserializer := internalMsg.AppMessageWrapperSerializer{}
+		packetConn, err := net.ListenUDP(lAddr.Network(), lAddr)
+		if err != nil {
+			panic(err)
+		}
+		sm.udpConn = packetConn
 		for {
-			msgBuf := make([]byte, 2048)
-			n, rErr := s.Read(msgBuf)
-			if rErr != nil {
-				log.Warnf("An error ocurred reading message using UDP:%s ", rErr.Error())
-				continue
+			msgBytes := make([]byte, 2048)
+			n, _, err := packetConn.ReadFrom(msgBytes)
+			if err != nil {
+				panic(err)
 			}
-
-			msgSize := int(binary.BigEndian.Uint32(msgBuf[:4]))
-			deserialized := deserializer.Deserialize(msgBuf[4 : 4+msgSize])
 			sender := &peer.IPeer{}
-			sender.Unmarshal(msgBuf[4+msgSize : n])
+			msgBuf := msgBytes[:n]
+			peerSize := sender.Unmarshal(msgBuf)
+			sm.logger.Info(sender.String())
+			deserialized := deserializer.Deserialize(msgBuf[peerSize:])
 			protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
+			// sm.logger.Infof("Got message via UDP: %+v", protoMsg)
 			for _, toNotifyID := range protoMsg.DestProtos {
 				if toNotify, ok := p.protocols.Load(toNotifyID); ok {
 					appMsg := p.serializationManager.Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
@@ -202,15 +198,12 @@ func (sm streamManager) AcceptConnectionsAndNotify(s stream.Stream) {
 				}
 			}
 		}
+	default:
+		panic("cannot listen in such addr")
 	}
 }
 
-func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, stream stream.Stream) {
-
-	if toDial.String() == SelfPeer().String() {
-		panic("Dialing self")
-	}
-
+func (sm *streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, addr net.Addr) {
 	sm.logger.Warnf("Dialing: %s", toDial.String())
 
 	doneDialing, ok := sm.dialingTransports.Load(toDial.String())
@@ -219,7 +212,6 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 		sm.waitDial(dialingProto, toDial, waitChan)
 		return
 	}
-
 	sm.dialingTransportsMutex.Lock()
 
 	_, connUp := sm.outboundTransports.Load(toDial.String())
@@ -252,11 +244,9 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	}()
 
 	sm.dialingTransportsMutex.Unlock()
-	remotePeer := &net.TCPAddr{IP: toDial.IP(), Port: int(toDial.ProtosPort())}
-	sm.logger.Infof("Dialing %+v", remotePeer)
-	err := stream.DialWithTimeout(remotePeer, p.config.DialTimeout)
+	conn, err := net.DialTimeout(addr.Network(), addr.String(), p.config.DialTimeout)
 	if err != nil {
-		err.Log(sm.logger)
+		sm.logger.Error(err)
 		dialError(dialingProto, toDial)
 		return
 	}
@@ -265,56 +255,55 @@ func (sm streamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer
 	// sm.logger.Infof("Exchanging protos")
 	//sm.logger.Info("Remote protos: %d", handshakeMsg.Protos)
 	//sm.logger.Infof("Starting handshake...")
+	switch newStreamTyped := conn.(type) {
+	case net.Conn:
+		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
+		herr := sm.sendHandshakeMessage(frameBasedConn, dialingProto, RegisteredProtos(), PermanentTunnel)
+		if herr != nil {
+			sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Error())
+			frameBasedConn.Close()
+			dialError(dialingProto, toDial)
+			return
+		}
 
-	mw := messageIO.NewMessageWriter(stream)
-	mr := messageIO.NewMessageReader(stream)
+		handshakeMsg, err := sm.waitForHandshakeMessage(frameBasedConn)
+		if err != nil {
+			frameBasedConn.Close()
+			dialError(dialingProto, toDial)
+			sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Reason())
+			return
+		}
 
-	err = sm.sendHandshakeMessage(mw, RegisteredProtos(), PermanentTunnel)
-	if err != nil {
-		sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Reason())
-		mr.Close()
-		dialError(dialingProto, toDial)
-		stream.Close()
-		stream = nil
-		return
-	}
-
-	handshakeMsg, err := sm.waitForHandshakeMessage(mr)
-	if err != nil {
-		mr.Close()
-		mw.Close()
-		dialError(dialingProto, toDial)
-		sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Reason())
-		stream = nil
-		return
-	}
-
-	newOutboundConn := messageIO.NewMessageWriter(stream)
-	sm.outboundTransports.Store(toDial.String(), newOutboundConn)
-	if !dialSuccess(dialingProto, handshakeMsg.Protos, toDial) {
-		sm.logger.Error("No protocol accepted conn")
-		mr.Close()
-		mw.Close()
-		sm.outboundTransports.Delete(toDial.String())
+		sm.outboundTransports.Store(toDial.String(), frameBasedConn)
+		if !dialSuccess(dialingProto, handshakeMsg.Protos, toDial) {
+			sm.logger.Error("No protocol accepted conn")
+			frameBasedConn.Close()
+			sm.outboundTransports.Delete(toDial.String())
+			sm.logStreamManagerState()
+			return
+		}
+		sm.logger.Warnf("Dialed %s successfully", toDial.String())
 		sm.logStreamManagerState()
-		stream = nil
-		return
+	case net.PacketConn:
+		sm.outboundTransports.Store(toDial.String(), newStreamTyped)
+		if !dialSuccess(dialingProto, []protocol.ID{dialingProto}, toDial) {
+			sm.logger.Error("No protocol accepted conn")
+			newStreamTyped.Close()
+			sm.outboundTransports.Delete(toDial.String())
+			sm.logStreamManagerState()
+			return
+		}
 	}
-	sm.logger.Warnf("Dialed %s successfully", toDial.String())
-	sm.logStreamManagerState()
 }
 
-func (sm streamManager) SendMessage(message []byte, p peer.Peer) errors.Error {
-	if p == nil {
-		sm.logger.Panic("Peer is nil")
-	}
-	outboundStream, ok := sm.outboundTransports.Load(p.String())
+func (sm *streamManager) SendMessage(message []byte, targetPeer peer.Peer) errors.Error {
+	outboundStream, ok := sm.outboundTransports.Load(targetPeer.String())
 	if !ok {
 		sm.dialingTransportsMutex.Lock()
-		doneDialing, ok := sm.dialingTransports.Load(p.String())
+		doneDialing, ok := sm.dialingTransports.Load(targetPeer.String())
 		if !ok {
 			sm.dialingTransportsMutex.Unlock()
-			outboundStream, ok = sm.outboundTransports.Load(p.String())
+			outboundStream, ok = sm.outboundTransports.Load(targetPeer.String())
 			if !ok {
 				return errors.NonFatalError(404, "stream not found", streamManagerCaller)
 			}
@@ -322,40 +311,49 @@ func (sm streamManager) SendMessage(message []byte, p peer.Peer) errors.Error {
 			sm.dialingTransportsMutex.Unlock()
 			waitChan := doneDialing.(chan interface{})
 			<-waitChan
-			outboundStream, ok = sm.outboundTransports.Load(p.String())
+			outboundStream, ok = sm.outboundTransports.Load(targetPeer.String())
 			if !ok {
 				return errors.NonFatalError(404, "stream not found", streamManagerCaller)
 			}
 		}
 	}
 
-	_, err := outboundStream.(outboundStreamValueType).Write(message)
-	if err != nil {
-		sm.logger.Error(err)
-		sm.handleOutboundTransportFailure(p)
+	switch conn := outboundStream.(type) {
+	case messageIO.FrameConn:
+		wErr := conn.WriteFrame(message)
+		if wErr != nil {
+			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+		}
+		return nil
+	case net.PacketConn:
+		peerBytes := p.config.Peer.Marshal()
+		_, wErr := conn.WriteTo(append(peerBytes, message...), targetPeer.ToUDPAddr())
+		if wErr != nil {
+			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+		}
+		return nil
 	}
 	return nil
 }
 
-func (sm streamManager) Disconnect(p peer.Peer) {
+func (sm *streamManager) Disconnect(p peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Disconnecting from %s", p.String())
 	sm.dialingTransportsMutex.Lock()
 	if conn, ok := sm.outboundTransports.Load(p.String()); ok {
-		conn.(outboundStreamValueType).Close()
+		conn.(io.Closer).Close()
 		sm.outboundTransports.Delete(p.String())
 	}
 	sm.dialingTransportsMutex.Unlock()
 	sm.logStreamManagerState()
 }
 
-func (sm streamManager) handleInStream(mr inboundStreamValueType, newPeer peer.Peer) {
+func (sm *streamManager) handleInStream(mr messageIO.FrameConn, newPeer peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Handling peer stream %s", newPeer.String())
 	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.String())
 
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
-		msgBuf := make([]byte, 4096)
-		n, err := mr.Read(msgBuf)
+		msgBuf, err := mr.ReadFrame()
 		if err != nil {
 			if err == io.EOF {
 				sm.logger.Warnf("Read routine from %s got %s, exiting cleanly...", newPeer.String(), err)
@@ -367,9 +365,8 @@ func (sm streamManager) handleInStream(mr inboundStreamValueType, newPeer peer.P
 			sm.inboundTransports.Delete(newPeer.String())
 			return
 		}
-
 		//sm.logger.Infof("Read %d bytes from %s", n, newPeer.ToString())
-		deserialized := deserializer.Deserialize(msgBuf[:n])
+		deserialized := deserializer.Deserialize(msgBuf)
 		protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
 		for _, toNotifyID := range protoMsg.DestProtos {
 			if toNotify, ok := p.protocols.Load(toNotifyID); ok {
@@ -383,7 +380,7 @@ func (sm streamManager) handleInStream(mr inboundStreamValueType, newPeer peer.P
 	}
 }
 
-func (sm streamManager) waitDial(dialerProto protocol.ID, toDial peer.Peer, waitChan chan interface{}) {
+func (sm *streamManager) waitDial(dialerProto protocol.ID, toDial peer.Peer, waitChan chan interface{}) {
 	<-waitChan
 	proto, _ := p.protocols.Load(dialerProto)
 	_, connUp := sm.outboundTransports.Load(toDial.String())
@@ -400,11 +397,11 @@ func (sm streamManager) waitDial(dialerProto protocol.ID, toDial peer.Peer, wait
 	}
 }
 
-func (sm streamManager) handleOutboundTransportFailure(remotePeer peer.Peer) errors.Error {
+func (sm *streamManager) handleOutboundTransportFailure(remotePeer peer.Peer) errors.Error {
 	sm.dialingTransportsMutex.Lock()
 	outConn, ok := sm.outboundTransports.Load(remotePeer.String())
 	if ok {
-		outConn.(outboundStreamValueType).Close()
+		outConn.(io.Closer).Close()
 		sm.outboundTransports.Delete(remotePeer.String())
 	}
 	sm.dialingTransportsMutex.Unlock()
@@ -412,20 +409,22 @@ func (sm streamManager) handleOutboundTransportFailure(remotePeer peer.Peer) err
 	return nil
 }
 
-func (sm streamManager) handleTmpStream(newPeer peer.Peer, mr messageIO.MessageReader) {
+func (sm *streamManager) handleTmpStream(newPeer peer.Peer, c messageIO.FrameConn) {
+	deserializer := internalMsg.AppMessageWrapperSerializer{}
 
 	if newPeer.String() == SelfPeer().String() {
 		panic("Dialing self")
 	}
 
 	//sm.logger.Info("Reading from tmp stream")
-	msg, err := sm.readAppMessage(mr)
+	msgBytes, err := c.ReadFrame()
 	if err != nil {
-		err.Log(sm.logger)
 		return
 	}
-	//sm.logger.Info("Done reading from tmp stream")
 
+	msgGeneric := deserializer.Deserialize(msgBytes)
+	msg := msgGeneric.(*internalMsg.AppMessageWrapper)
+	//sm.logger.Info("Done reading from tmp stream")
 	appMsg := p.serializationManager.Deserialize(msg.MessageID, msg.WrappedMsgBytes)
 	for _, toNotifyID := range msg.DestProtos {
 		if toNotify, ok := p.protocols.Load(toNotifyID); ok {
@@ -435,45 +434,33 @@ func (sm streamManager) handleTmpStream(newPeer peer.Peer, mr messageIO.MessageR
 			sm.logger.Errorf("Ignored message: %+v", appMsg)
 		}
 	}
-	mr.Close()
+	c.Close()
 }
 
-func (sm streamManager) waitForHandshakeMessage(transport io.Reader) (*internalMsg.ProtoHandshakeMessage, errors.Error) {
-	msgBytes := make([]byte, 2048)
-	read, err := transport.Read(msgBytes)
+func (sm *streamManager) waitForHandshakeMessage(frameBasedConn messageIO.FrameConn) (*internalMsg.ProtoHandshakeMessage, errors.Error) {
+	msgBytes, err := frameBasedConn.ReadFrame()
 	if err != nil {
 		return nil, errors.NonFatalError(500, err.Error(), streamManagerCaller)
 	}
-	msg := protoMsgSerializer.Deserialize(msgBytes[:read]).(internalMsg.ProtoHandshakeMessage)
+	msg := protoMsgSerializer.Deserialize(msgBytes).(internalMsg.ProtoHandshakeMessage)
 	//sm.logger.Infof("Received proto exchange message %+v", msg)
 	return &msg, nil
 }
 
-func (sm streamManager) readAppMessage(stream io.Reader) (*internalMsg.AppMessageWrapper, errors.Error) {
-	msgBuf := make([]byte, 2048)
-	n, err := stream.Read(msgBuf)
-	if err != nil {
-		return nil, errors.NonFatalError(500, err.Error(), streamManagerCaller)
-	}
-	deserialized := appMsgDeserializer.Deserialize(msgBuf[:n]).(*internalMsg.AppMessageWrapper)
-	return deserialized, nil
-}
-
-func (sm streamManager) sendHandshakeMessage(transport io.Writer, destProtos []protocol.ID, chanType uint8) errors.Error {
-	var toSend = internalMsg.NewProtoHandshakeMessage(destProtos, SelfPeer(), chanType)
+func (sm *streamManager) sendHandshakeMessage(transport messageIO.FrameConn, dialerProto protocol.ID, destProtos []protocol.ID, chanType uint8) errors.Error {
+	var toSend = internalMsg.NewProtoHandshakeMessage(dialerProto, destProtos, SelfPeer(), chanType)
 	msgBytes := protoMsgSerializer.Serialize(toSend)
-	_, err := transport.Write(msgBytes)
+	err := transport.WriteFrame(msgBytes)
 	if err != nil {
 		return errors.NonFatalError(500, err.Error(), streamManagerCaller)
 	}
 	return nil
 }
 
-func (sm streamManager) logStreamManagerState() {
+func (sm *streamManager) logStreamManagerState() {
 	inboundNr := 0
 	outboundNr := 0
 	toLog := "inbound connections : "
-	sm.logger.Info("------------- Protocol Manager state -------------")
 	sm.inboundTransports.Range(func(peer, conn interface{}) bool {
 		toLog += fmt.Sprintf("%s, ", peer.(string))
 		inboundNr++
@@ -488,8 +475,4 @@ func (sm streamManager) logStreamManagerState() {
 		return true
 	})
 	sm.logger.Info(toLog)
-	if outboundNr != inboundNr {
-		sm.logger.Warn("Inbound connections and outboundConnections are mismatched")
-	}
-	sm.logger.Info("--------------------------------------------------")
 }

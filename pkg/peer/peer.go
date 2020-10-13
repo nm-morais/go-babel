@@ -14,6 +14,8 @@ type Peer interface {
 	String() string
 	Marshal() []byte
 	Unmarshal([]byte) int
+	ToTCPAddr() *net.TCPAddr
+	ToUDPAddr() *net.UDPAddr
 }
 
 type IPeer struct {
@@ -100,4 +102,12 @@ func DeserializePeerArray(buf []byte) (int, []Peer) {
 		peers[i] = p
 	}
 	return bufPos, peers
+}
+
+func (p *IPeer) ToTCPAddr() *net.TCPAddr {
+	return &net.TCPAddr{IP: p.ip, Port: int(p.protosPort)}
+}
+
+func (p *IPeer) ToUDPAddr() *net.UDPAddr {
+	return &net.UDPAddr{IP: p.ip, Port: int(p.protosPort)}
 }

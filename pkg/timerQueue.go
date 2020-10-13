@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/nm-morais/go-babel/pkg/dataStructures"
+	priorityqueue "github.com/nm-morais/go-babel/pkg/dataStructures/priorityQueue"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/protocol"
@@ -33,16 +33,16 @@ type TimerQueue interface {
 }
 
 type timerQueueImpl struct {
-	pq              dataStructures.PriorityQueue
-	addTimerChan    chan *dataStructures.Item
+	pq              priorityqueue.PriorityQueue
+	addTimerChan    chan *priorityqueue.Item
 	cancelTimerChan chan *cancelTimerReq
 	logger          *logrus.Logger
 }
 
 func NewTimerQueue() TimerQueue {
 	tq := &timerQueueImpl{
-		pq:              make(dataStructures.PriorityQueue, 0),
-		addTimerChan:    make(chan *dataStructures.Item),
+		pq:              make(priorityqueue.PriorityQueue, 0),
+		addTimerChan:    make(chan *priorityqueue.Item),
 		cancelTimerChan: make(chan *cancelTimerReq),
 		logger:          logs.NewLogger(timerQueueCaller),
 	}
@@ -52,7 +52,7 @@ func NewTimerQueue() TimerQueue {
 
 func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) int {
 	newTimerId := rand.Int()
-	pqItem := &dataStructures.Item{
+	pqItem := &priorityqueue.Item{
 		Value: &pqItemValue{
 			protoID: protocolId,
 			timer:   timer,
@@ -98,12 +98,12 @@ LOOP:
 	for {
 		// tq.logger.Infof("timer queue loop")
 
-		var nextItem *dataStructures.Item
+		var nextItem *priorityqueue.Item
 		var waitTime time.Duration
 		var currTimer = time.NewTimer(math.MaxInt64)
 
 		if tq.pq.Len() > 0 {
-			nextItem = heap.Pop(&tq.pq).(*dataStructures.Item)
+			nextItem = heap.Pop(&tq.pq).(*priorityqueue.Item)
 			value := nextItem.Value.(*pqItemValue)
 			waitTime = time.Until(value.timer.Deadline())
 			currTimer = time.NewTimer(waitTime)

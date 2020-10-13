@@ -178,7 +178,10 @@ func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) 
 	return false
 }
 
-func (m *PingPongProtocol) InConnRequested(peer peer.Peer) bool {
+func (m *PingPongProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Peer) bool {
+	if dialerProto != m.ID() {
+		return false
+	}
 	return true
 }
 

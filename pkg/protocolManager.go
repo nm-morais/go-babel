@@ -3,6 +3,7 @@ package pkg
 import (
 	"fmt"
 	"io"
+	"net"
 
 	_ "net/http/pprof"
 	"os"
@@ -20,10 +21,10 @@ import (
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/notification"
+	"github.com/nm-morais/go-babel/pkg/peer"
 	. "github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/request"
-	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	log "github.com/sirupsen/logrus"
 )
@@ -50,7 +51,7 @@ type ProtoManager struct {
 	protocols               *sync.Map
 	protoIds                []protocol.ID
 	streamManager           StreamManager
-	listeners               []stream.Stream
+	listenAddrs             []net.Addr
 	channelSubscribers      map[string]map[protocol.ID]bool
 	channelSubscribersMutex *sync.Mutex
 	logger                  *log.Logger
@@ -76,8 +77,8 @@ func InitProtoManager(configs ProtocolManagerConfig) ProtoManager {
 	return p
 }
 
-func RegisterListener(listener stream.Stream) {
-	p.listeners = append(p.listeners, listener)
+func RegisterListenAddr(addr net.Addr) {
+	p.listenAddrs = append(p.listenAddrs, addr)
 }
 
 func RegisterProtocol(protocol protocol.Protocol) errors.Error {
@@ -225,25 +226,25 @@ func GetNodeWatcher() NodeWatcher {
 	return p.nodeWatcher
 }
 
-func SendMessageSideStream(toSend message.Message, targetPeer Peer, sourceProtoID protocol.ID, destProtos []protocol.ID, t stream.Stream) {
+func SendMessageSideStream(toSend message.Message, peer peer.Peer, addr net.Addr, sourceProtoID protocol.ID, destProtos []protocol.ID) {
 	callerProto, ok := p.protocols.Load(sourceProtoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", sourceProtoID)
 	}
 	go func() {
-		err := p.streamManager.SendMessageSideStream(toSend, targetPeer, sourceProtoID, destProtos, t)
+		err := p.streamManager.SendMessageSideStream(toSend, peer, addr, sourceProtoID, destProtos)
 		if err != nil {
-			callerProto.(protocolValueType).MessageDeliveryErr(toSend, targetPeer, err)
+			callerProto.(protocolValueType).MessageDeliveryErr(toSend, peer, err)
 			return
 		}
-		callerProto.(protocolValueType).MessageDelivered(toSend, targetPeer)
+		callerProto.(protocolValueType).MessageDelivered(toSend, peer)
 	}()
 
 }
 
-func Dial(toDial Peer, sourceProtoID protocol.ID, t stream.Stream) {
+func Dial(dialingProto protocol.ID, peer peer.Peer, toDial net.Addr) {
 	p.logger.Warnf("Dialing new node %s", toDial.String())
-	go p.streamManager.DialAndNotify(sourceProtoID, toDial, t)
+	go p.streamManager.DialAndNotify(dialingProto, peer, toDial)
 }
 
 func Disconnect(source protocol.ID, toDc Peer) {
@@ -264,7 +265,8 @@ func SelfPeer() Peer {
 	return p.config.Peer
 }
 
-func inConnRequested(remoteProtos []protocol.ID, dialer Peer) bool {
+func inConnRequested(dialerProto protocol.ID, remoteProtos []protocol.ID, dialer Peer) []protocol.ID {
+	acceptedProtos := []protocol.ID{}
 	p.channelSubscribersMutex.Lock()
 	subs := p.channelSubscribers[dialer.String()]
 	if subs == nil {
@@ -272,19 +274,20 @@ func inConnRequested(remoteProtos []protocol.ID, dialer Peer) bool {
 	}
 	for _, remoteProtoID := range remoteProtos {
 		if proto, ok := p.protocols.Load(remoteProtoID); ok {
-			if proto.(protocolValueType).InConnRequested(dialer) {
+			if proto.(protocolValueType).InConnRequested(dialerProto, dialer) {
 				subs[proto.(protocolValueType).ID()] = true
+				acceptedProtos = append(acceptedProtos, proto.(protocolValueType).ID())
 			}
 		}
 	}
 	if len(subs) == 0 {
 		delete(p.channelSubscribers, dialer.String())
 		p.channelSubscribersMutex.Unlock()
-		return false
+		return acceptedProtos
 	}
 	p.channelSubscribers[dialer.String()] = subs
 	p.channelSubscribersMutex.Unlock()
-	return true
+	return acceptedProtos
 }
 
 func dialError(sourceProto protocol.ID, dialedPeer Peer) {
@@ -409,7 +412,7 @@ func Start() {
 	setupLoggers()
 	setupPerformanceProfiling(p.config.Cpuprofile, p.config.Memprofile)
 
-	for _, l := range p.listeners {
+	for _, l := range p.listenAddrs {
 		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
 		go p.streamManager.AcceptConnectionsAndNotify(l)
 	}

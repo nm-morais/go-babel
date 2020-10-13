@@ -13,7 +13,6 @@ import (
 
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	"github.com/nm-morais/go-babel/pkg/stream"
 )
 
 func main() {
@@ -89,8 +88,8 @@ func main() {
 	fmt.Println(fmt.Sprintf("Contact node %+v", contactNode))
 
 	pkg.InitProtoManager(protoManagerConf)
-	pkg.RegisterListener(stream.NewTCPListener(&net.TCPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())}))
-	pkg.RegisterListener(stream.NewUDPListener(&net.UDPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())}))
+	pkg.RegisterListenAddr(&net.TCPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
+	pkg.RegisterListenAddr(&net.UDPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
 	pkg.InitNodeWatcher(nodeWatcherConf)
 	pkg.RegisterProtocol(NewHyparviewProtocol(contactNode))
 	pkg.Start()

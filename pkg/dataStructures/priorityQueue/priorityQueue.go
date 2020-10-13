@@ -1,4 +1,4 @@
-package dataStructures
+package priorityqueue
 
 import (
 	"container/heap"

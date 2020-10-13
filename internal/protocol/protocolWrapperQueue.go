@@ -5,7 +5,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/nm-morais/go-babel/pkg/dataStructures"
+	blockingqueue "github.com/nm-morais/go-babel/pkg/dataStructures/blockingQueue"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/message"
@@ -53,7 +53,7 @@ type WrapperProtocol struct {
 	timerHandlers        map[timer.ID]handlers.TimerHandler
 
 	// event queue
-	eventQueue *dataStructures.BlockingQueue
+	eventQueue *blockingqueue.BlockingQueue
 }
 
 type reqWithReplyCHan struct {
@@ -79,8 +79,9 @@ type messageWithPeerAndErr struct {
 }
 
 type inConnReqEventWithBoolReply struct {
-	peer     peer.Peer
-	respChan chan bool
+	dialerProto protocol.ID
+	peer        peer.Peer
+	respChan    chan bool
 }
 
 func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
@@ -94,7 +95,7 @@ func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
 		replyHandlers:        make(map[request.ID]handlers.ReplyHandler),
 		timerHandlers:        make(map[timer.ID]handlers.TimerHandler),
 	}
-	newEventQueue, err := dataStructures.NewArrayBlockingQueue(QueueSize)
+	newEventQueue, err := blockingqueue.NewArrayBlockingQueue(QueueSize)
 	if err != nil {
 		panic(err)
 	}
@@ -167,10 +168,11 @@ func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.
 	}
 }
 
-func (pw WrapperProtocol) InConnRequested(peer peer.Peer) bool {
+func (pw WrapperProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Peer) bool {
 	event := inConnReqEventWithBoolReply{
-		peer:     peer,
-		respChan: make(chan bool),
+		dialerProto: dialerProto,
+		peer:        peer,
+		respChan:    make(chan bool),
 	}
 	if _, err := pw.eventQueue.Put(NewEvent(inConnRequestedEvent, event)); err != nil {
 		panic(err)
@@ -231,7 +233,7 @@ func (pw WrapperProtocol) handleChannels() {
 		switch nextEvent.eventype {
 		case inConnRequestedEvent:
 			event := nextEvent.eventContent.(inConnReqEventWithBoolReply)
-			event.respChan <- pw.wrappedProtocol.InConnRequested(event.peer)
+			event.respChan <- pw.wrappedProtocol.InConnRequested(event.dialerProto, event.peer)
 		case dialSuccessEvent:
 			event := nextEvent.eventContent.(dialSuccessWithBoolReplyChan)
 			event.respChan <- pw.wrappedProtocol.DialSuccess(event.dialingProto, event.peer)
@@ -292,7 +294,7 @@ func (pw WrapperProtocol) handleReply(reply request.Reply) {
 func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
-		panic("message handler not found")
+		panic(fmt.Sprintf("message handler for message id %d not found in protocol %d", receivedMsg.Type(), pw.id))
 	}
 	handler(peer, receivedMsg)
 }

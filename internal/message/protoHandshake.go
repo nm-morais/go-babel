@@ -11,16 +11,18 @@ import (
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
 
 type ProtoHandshakeMessage struct {
-	TunnelType uint8
-	Peer       peer.Peer
-	Protos     []protocol.ID
+	TunnelType  uint8
+	Peer        peer.Peer
+	DialerProto protocol.ID
+	Protos      []protocol.ID
 }
 
-func NewProtoHandshakeMessage(protos []protocol.ID, peer peer.Peer, temporaryConn uint8) message.Message {
+func NewProtoHandshakeMessage(dialerProto protocol.ID, protos []protocol.ID, peer peer.Peer, temporaryConn uint8) message.Message {
 	return ProtoHandshakeMessage{
-		Peer:       peer,
-		Protos:     protos,
-		TunnelType: temporaryConn,
+		DialerProto: dialerProto,
+		Peer:        peer,
+		Protos:      protos,
+		TunnelType:  temporaryConn,
 	}
 }
 
@@ -40,11 +42,13 @@ func (msg ProtoHandshakeMessage) Deserializer() message.Deserializer {
 
 func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []byte {
 	protoMsg := message.(ProtoHandshakeMessage)
-	msgSize := 2*len(protoMsg.Protos) + 2 + 1
+	msgSize := 2*len(protoMsg.Protos) + 2 + 2 + 1
 	buf := make([]byte, msgSize)
 	bufPos := 0
 	buf[0] = protoMsg.TunnelType
 	bufPos++
+	binary.BigEndian.PutUint16(buf[bufPos:], protoMsg.DialerProto)
+	bufPos += 2
 	binary.BigEndian.PutUint16(buf[bufPos:], uint16(len(protoMsg.Protos)))
 	bufPos += 2
 	for _, protoID := range protoMsg.Protos {
@@ -60,6 +64,10 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 	bufPos := 0
 	newMsg.TunnelType = buf[0]
 	bufPos++
+
+	dialerProto := binary.BigEndian.Uint16(buf[bufPos:])
+	bufPos += 2
+
 	nrProtos := binary.BigEndian.Uint16(buf[bufPos:])
 	bufPos += 2
 	newMsg.Protos = make([]protocol.ID, nrProtos)
@@ -70,5 +78,6 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 	p := &peer.IPeer{}
 	p.Unmarshal(buf[bufPos:])
 	newMsg.Peer = p
+	newMsg.DialerProto = dialerProto
 	return newMsg
 }
