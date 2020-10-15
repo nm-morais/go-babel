@@ -54,11 +54,11 @@ func (p *IPeer) String() string {
 
 func PeersEqual(p1 Peer, p2 Peer) bool {
 
-	if reflect.ValueOf(p1).IsZero() {
+	if reflect.ValueOf(p1).IsNil() {
 		return false
 	}
 
-	if reflect.ValueOf(p2).IsZero() {
+	if reflect.ValueOf(p2).IsNil() {
 		return false
 	}
 

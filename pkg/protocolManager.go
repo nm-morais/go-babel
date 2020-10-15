@@ -4,11 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net"
-
-	_ "net/http/pprof"
 	"os"
 	"reflect"
-	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -187,7 +184,6 @@ func SendMessageAndDisconnect(toSend message.Message, destPeer Peer, origin prot
 			return
 		}
 		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
-
 	}()
 }
 
@@ -408,13 +404,11 @@ func RegisterTimer(origin protocol.ID, timer timer.Timer) int {
 }
 
 func Start() {
-
 	setupLoggers()
-	setupPerformanceProfiling(p.config.Cpuprofile, p.config.Memprofile)
-
 	for _, l := range p.listenAddrs {
 		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
-		go p.streamManager.AcceptConnectionsAndNotify(l)
+		done := p.streamManager.AcceptConnectionsAndNotify(l)
+		<-done
 	}
 
 	p.protocols.Range(func(_, proto interface{}) bool {
@@ -426,40 +420,5 @@ func Start() {
 		go proto.(protocolValueType).Start()
 		return true
 	})
-
-	deadline := time.Now().Add(7 * time.Minute)
-	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
-	<-time.After(time.Until(deadline))
-	if p.config.Cpuprofile {
-		pprof.StopCPUProfile()
-	}
-	if p.config.Memprofile {
-		f, err := os.Create(logFolder + "memprofile")
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = pprof.WriteHeapProfile(f)
-		if err != nil {
-			log.Fatal(err)
-		}
-		f.Close()
-	}
-
 	select {}
-
-}
-
-func setupPerformanceProfiling(doCpuprofile, doMemprofile bool) {
-
-	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
-	if doCpuprofile {
-		f, err := os.Create(logFolder + "cpuprofile")
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = pprof.StartCPUProfile(f)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
 }

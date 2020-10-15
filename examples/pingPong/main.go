@@ -8,7 +8,6 @@ import (
 
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	"github.com/nm-morais/go-babel/pkg/stream"
 )
 
 func main() {
@@ -46,7 +45,7 @@ func main() {
 
 	pkg.InitProtoManager(config)
 	contactNode := peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(1200), uint16(1200))
-	pkg.RegisterListener(stream.NewTCPListener(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())}))
+	pkg.RegisterListenAddr(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())})
 	pkg.RegisterProtocol(NewPingPongProtocol(contactNode))
 	pkg.Start()
 }

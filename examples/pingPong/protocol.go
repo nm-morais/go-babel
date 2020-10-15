@@ -9,7 +9,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	"github.com/sirupsen/logrus"
 )
@@ -123,7 +122,7 @@ func (m *PingPongProtocol) Init() {
 func (m *PingPongProtocol) Start() {
 	if !peer.PeersEqual(pkg.SelfPeer(), m.contact) {
 		m.logger.Infof("Dialing contact node")
-		pkg.Dial(m.contact, protoID, stream.NewTCPDialer())
+		pkg.Dial(protoID, m.contact, m.contact.ToTCPAddr())
 	} else {
 		m.logger.Infof("I'm contact node")
 	}

@@ -53,6 +53,8 @@ type NodeInfo struct {
 	Detector    *analytics.PhiAccuralFailureDetector
 }
 
+type nodeWatchingValue = *NodeInfo
+
 type cancelCondReq struct {
 	key     int
 	removed chan int
@@ -62,13 +64,14 @@ type NodeWatcherImpl struct {
 	selfPeer peer.Peer
 	conf     NodeWatcherConf
 
-	watching     map[string]*NodeInfo
-	watchingLock *sync.RWMutex
-	udpConn      net.UDPConn
+	watching sync.Map
 
-	conditions     priorityqueue.PriorityQueue
-	addCondChan    chan *priorityqueue.Item
-	cancelCondChan chan *cancelCondReq
+	udpConn net.UDPConn
+
+	conditions          priorityqueue.PriorityQueue
+	addCondChan         chan *priorityqueue.Item
+	cancelCondChan      chan *cancelCondReq
+	removeNodeCondsChan chan peer.Peer
 
 	logger *logrus.Logger
 }
@@ -116,14 +119,14 @@ type NodeWatcher interface {
 
 func NewNodeWatcher(selfPeer Peer, config NodeWatcherConf) NodeWatcher {
 	nm := &NodeWatcherImpl{
-		conf:           config,
-		selfPeer:       selfPeer,
-		watching:       make(map[string]*NodeInfo),
-		watchingLock:   &sync.RWMutex{},
-		conditions:     make(priorityqueue.PriorityQueue, 0),
-		logger:         logs.NewLogger(nodeWatcherCaller),
-		addCondChan:    make(chan *priorityqueue.Item),
-		cancelCondChan: make(chan *cancelCondReq),
+		conf:                config,
+		selfPeer:            selfPeer,
+		watching:            sync.Map{},
+		conditions:          make(priorityqueue.PriorityQueue, 0),
+		logger:              logs.NewLogger(nodeWatcherCaller),
+		addCondChan:         make(chan *priorityqueue.Item),
+		cancelCondChan:      make(chan *cancelCondReq),
+		removeNodeCondsChan: make(chan peer.Peer),
 	}
 
 	if nm.conf.OldLatencyWeight+nm.conf.NewLatencyWeight != 1 {
@@ -145,27 +148,18 @@ func NewNodeWatcher(selfPeer Peer, config NodeWatcherConf) NodeWatcher {
 	return nm
 }
 
-func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, p peer.Peer) {
-	stream, err := nm.establishStreamTo(p)
+func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, nodeInfo *NodeInfo) {
+	stream, err := nm.establishStreamTo(nodeInfo.Peer, nodeInfo)
 	if err != nil {
-		nm.watchingLock.Lock()
-		curr, ok := nm.watching[p.String()]
-		if ok {
-			close(curr.err)
-		}
-		nm.watchingLock.Unlock()
+		close(nodeInfo.err)
 		return
 	}
-	nm.watchingLock.Lock()
-	curr := nm.watching[p.String()]
-	curr.peerConn = stream
+	nodeInfo.peerConn = stream
 	switch stream := stream.(type) {
 	case *net.TCPConn:
 		go nm.handleTCPConnection(stream)
 	}
-	nm.watching[p.String()] = curr
-	nm.watchingLock.Unlock()
-	nm.startHbRoutine(curr)
+	nm.startHbRoutine(nodeInfo)
 }
 
 func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Error {
@@ -173,9 +167,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 		panic("Tried to watch nil peer")
 	}
 	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.String())
-	nm.watchingLock.Lock()
-	if _, ok := nm.watching[p.String()]; ok {
-		nm.watchingLock.Unlock()
+	if _, ok := nm.watching.Load(p.String()); ok {
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
 	var nrMessages int32 = 0
@@ -183,7 +175,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 	if err != nil {
 		panic(err)
 	}
-	nm.watching[p.String()] = &NodeInfo{
+	nodeInfo := &NodeInfo{
 		nrMessagesReceived: &nrMessages,
 		Peer:               p,
 		LatencyCalc:        analytics.NewLatencyCalculator(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight),
@@ -193,8 +185,8 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 		err:                make(chan interface{}),
 		unwatch:            make(chan interface{}),
 	}
-	nm.watchingLock.Unlock()
-	go nm.dialAndWatch(issuerProto, p)
+	nm.watching.Store(p.String(), nodeInfo)
+	go nm.dialAndWatch(issuerProto, nodeInfo)
 	return nil
 }
 
@@ -203,9 +195,7 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 	if reflect.ValueOf(p).IsNil() {
 		panic("Tried to watch nil peer")
 	}
-	nm.watchingLock.Lock()
-	if _, ok := nm.watching[p.String()]; ok {
-		nm.watchingLock.Unlock()
+	if _, ok := nm.watching.Load(p.String()); ok {
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
 	var nrMessages int32 = 0
@@ -227,9 +217,8 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 	close(newNodeInfo.enoughSamples)
 	close(newNodeInfo.enoughTestMessages)
 	newNodeInfo.LatencyCalc.AddMeasurement(latency)
-	nm.watching[p.String()] = newNodeInfo
-	nm.watchingLock.Unlock()
-	go nm.dialAndWatch(issuerProto, p)
+	nm.watching.Store(p.String(), newNodeInfo)
+	go nm.dialAndWatch(issuerProto, newNodeInfo)
 	return nil
 }
 
@@ -292,26 +281,23 @@ func (nm *NodeWatcherImpl) startHbRoutine(nodeInfo *NodeInfo) {
 
 func (nm *NodeWatcherImpl) Unwatch(peer Peer, protoID protocol.ID) errors.Error {
 	nm.logger.Infof("Proto %d request to unwatch %s", protoID, peer.String())
-	nm.watchingLock.Lock()
-	watchedPeer, ok := nm.watching[peer.String()]
+	watchedPeer, ok := nm.watching.Load(peer.String())
 	if !ok {
-		nm.watchingLock.Unlock()
 		nm.logger.Warn("peer not being tracked")
 		return errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
-	close(watchedPeer.unwatch)
-	delete(nm.watching, peer.String())
-	nm.watchingLock.Unlock()
+	close(watchedPeer.(nodeWatchingValue).unwatch)
+	nm.removeNodeCondsChan <- peer
+	nm.watching.Delete(peer.String())
 	return nil
 }
 
 func (nm *NodeWatcherImpl) GetNodeInfo(peer peer.Peer) (*NodeInfo, errors.Error) {
-	nm.watchingLock.RLock()
-	defer nm.watchingLock.RUnlock()
-	nodeInfo, ok := nm.watching[peer.String()]
+	nodeInfoInt, ok := nm.watching.Load(peer.String())
 	if !ok {
 		return nil, errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
+	nodeInfo := nodeInfoInt.(nodeWatchingValue)
 	select {
 	case <-nodeInfo.enoughSamples:
 		return nodeInfo, nil
@@ -325,13 +311,11 @@ func (nm *NodeWatcherImpl) GetNodeInfo(peer peer.Peer) (*NodeInfo, errors.Error)
 }
 
 func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (*NodeInfo, errors.Error) {
-	nm.watchingLock.RLock()
-	nodeInfo, ok := nm.watching[peer.String()]
+	nodeInfoInt, ok := nm.watching.Load(peer.String())
 	if !ok {
-		nm.watchingLock.RUnlock()
 		return nil, errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
-	nm.watchingLock.RUnlock()
+	nodeInfo := nodeInfoInt.(nodeWatchingValue)
 	select {
 	case <-nodeInfo.err:
 		return nil, errors.NonFatalError(404, "An error ocurred watching node %s", peer.String())
@@ -348,56 +332,33 @@ func (nm *NodeWatcherImpl) Logger() *logrus.Logger {
 	return nm.logger
 }
 
-func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer) (net.Conn, errors.Error) {
-
+func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfo) (net.Conn, errors.Error) {
 	//nm.logger.Infof("Establishing stream to %s", p.ToString())
 	udpTestDeadline := time.Now().Add(nm.conf.UdpTestTimeout)
 	rAddrUdp := &net.UDPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
-
-	for i := 0; i < nm.conf.MaxRedials; i++ {
-		for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
-			//nm.logger.Infof("Writing test message to: %s", p.ToString())
-			_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(analytics.NewHBMessageForceReply(nm.selfPeer, true)), rAddrUdp)
-			if err != nil {
-				panic(err)
-			}
-		}
-
-		nm.watchingLock.RLock()
-		nodeInfo, ok := nm.watching[p.String()]
-		if !ok {
-			nm.watchingLock.RUnlock()
-			return nil, errors.NonFatalError(500, "peer unwatched in the meantime", nodeWatcherCaller)
-		}
-		nm.watchingLock.RUnlock()
-
-		select {
-		case <-nodeInfo.enoughTestMessages:
-			nm.watchingLock.RLock()
-			nodeInfo, ok = nm.watching[p.String()]
-			if !ok {
-				nm.watchingLock.RUnlock()
-				return nil, errors.NonFatalError(500, "peer unwatched in the meantime", nodeWatcherCaller)
-			}
-			nm.watchingLock.RUnlock()
-			return &nm.udpConn, nil
-		case <-nodeInfo.err:
-			return &nm.udpConn, errors.NonFatalError(500, "error occurred establishing udp conn", nodeWatcherCaller)
-		case <-nodeInfo.unwatch:
-			return &nm.udpConn, errors.NonFatalError(500, "error occurred establishing udp conn", nodeWatcherCaller)
-		case <-time.After(time.Until(udpTestDeadline)):
-			nm.logger.Warnf("falling back to TCP")
-			// attempting to connect by TCP
-			rAddrTcp := &net.TCPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
-			tcpConn, err := net.DialTimeout("tcp", rAddrTcp.String(), nm.conf.TcpTestTimeout)
-			if err != nil {
-				continue
-			}
-			return tcpConn, nil
-
+	for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
+		//nm.logger.Infof("Writing test message to: %s", p.ToString())
+		_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(analytics.NewHBMessageForceReply(nm.selfPeer, true)), rAddrUdp)
+		if err != nil {
+			panic(err)
 		}
 	}
-	return nil, errors.NonFatalError(500, "Could not establish connection", nodeWatcherCaller)
+
+	select {
+	case <-nodeInfo.enoughTestMessages:
+		return &nm.udpConn, nil
+	case <-nodeInfo.unwatch:
+		return &nm.udpConn, errors.NonFatalError(500, "error occurred establishing udp conn", nodeWatcherCaller)
+	case <-time.After(time.Until(udpTestDeadline)):
+		nm.logger.Warnf("falling back to TCP")
+	}
+
+	rAddrTcp := &net.TCPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
+	tcpConn, err := net.DialTimeout("tcp", rAddrTcp.String(), nm.conf.TcpTestTimeout)
+	if err != nil {
+		return nil, errors.NonFatalError(500, "failed to establish connection", nodeWatcherCaller)
+	}
+	return tcpConn, nil
 }
 
 func (nm *NodeWatcherImpl) start() {
@@ -460,14 +421,11 @@ func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
 func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.FrameConn) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
 	// nm.logger.Infof("handling hb message via TCP :%+v", hb)
-	nm.watchingLock.RLock()
-	nodeInfo, ok := nm.watching[hb.Sender.String()]
+	nodeInfoInt, ok := nm.watching.Load(hb.Sender.String())
 	if !ok {
-		nm.watchingLock.RUnlock()
-		nm.logger.Warn("Received reply for unwatched node, discarding...")
-		return errors.NonFatalError(500, "Received reply for unwatched node, discarding...", nodeWatcherCaller)
+		return errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 	}
-	nm.watchingLock.RUnlock()
+	nodeInfo := nodeInfoInt.(nodeWatchingValue)
 
 	if hb.IsReply {
 		//nm.logger.Infof("handling hb reply message")
@@ -497,15 +455,11 @@ func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.Frame
 func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
 	if hb.IsReply {
-		sender := hb.Sender
-		nm.watchingLock.RLock()
-		nodeInfo, ok := nm.watching[sender.String()]
+		nodeInfoInt, ok := nm.watching.Load(hb.Sender.String())
 		if !ok {
-			nm.watchingLock.RUnlock()
-			nm.logger.Warn("Received reply for unwatched node, discarding...")
-			return errors.NonFatalError(500, "Received reply for unwatched node, discarding...", nodeWatcherCaller)
+			return errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
 		}
-		nm.watchingLock.RUnlock()
+		nodeInfo := nodeInfoInt.(nodeWatchingValue)
 		nm.registerHBReply(hb, nodeInfo)
 		return nil
 	}
@@ -594,11 +548,11 @@ func (nm *NodeWatcherImpl) NotifyOnCondition(c Condition) (int, errors.Error) {
 }
 
 func (nm *NodeWatcherImpl) evalCondsPeriodic() {
-	var waitTime time.Duration
-	var nextItem *priorityqueue.Item
 
 LOOP:
 	for {
+		var waitTime time.Duration
+		var nextItem *priorityqueue.Item
 		heap.Init(&nm.conditions)
 		var nextItemTimer = time.NewTimer(math.MaxInt64)
 		if nm.conditions.Len() > 0 {
@@ -609,16 +563,34 @@ LOOP:
 		select {
 		case newItem := <-nm.addCondChan:
 			// nm.logger.Infof("Received add condition signal...")
-			// nm.logger.Infof("Adding condition %d", newItem.Key)
+			nm.logger.Infof("Adding condition %d", newItem.Key)
 			heap.Push(&nm.conditions, newItem)
 			if nextItem != nil {
 				// nm.logger.Infof("nextItem (%d) was not nil, re-adding to condition list", nextItem.Key)
 				heap.Push(&nm.conditions, nextItem)
 			}
-			//nm.conditions.LogEntries(nm.logger)
+
+		case toRemove := <-nm.removeNodeCondsChan:
+			nm.logger.Infof("removing conds from node: %s", toRemove.String())
+			// nm.logger.Infof("conds: %+v", nm.conditions)
+			if nextItem != nil {
+				heap.Push(&nm.conditions, nextItem)
+			}
+
+			for idx, cond := range nm.conditions {
+				// nm.logger.Infof("cond: %+v", cond)
+				if cond != nil {
+					if PeersEqual(cond.Value.(Condition).Peer, toRemove) {
+						heap.Remove(&nm.conditions, idx)
+					}
+				}
+			}
+			heap.Init(&nm.conditions)
 		case req := <-nm.cancelCondChan:
 			// nm.logger.Infof("Received cancel cond signal...")
 			if req.key == nextItem.Key {
+				nm.logger.Infof("Removed condition %d successfully", req.key)
+
 				req.removed <- req.key
 				// nm.logger.Infof("Removed condition %d successfully", req.key)
 				continue LOOP
@@ -635,13 +607,12 @@ LOOP:
 			// nm.conditions.LogEntries(nm.logger)
 		case <-nextItemTimer.C:
 			cond := nextItem.Value.(Condition)
-			nm.watchingLock.RLock()
-			nodeStats, ok := nm.watching[cond.Peer.String()]
-			nm.watchingLock.RUnlock()
+			nodeInfoInt, ok := nm.watching.Load(cond.Peer.String())
 			if ok { // remove all conditions from unwatched nodes
+				nodeInfo := nodeInfoInt.(nodeWatchingValue)
 				select {
-				case <-nodeStats.enoughSamples:
-					if cond.CondFunc(nodeStats) {
+				case <-nodeInfo.enoughSamples:
+					if cond.CondFunc(nodeInfo) {
 						nm.logger.Infof("Condition trigger: %+v", *nextItem)
 						go SendNotification(cond.Notification)
 						if cond.Repeatable {
@@ -689,19 +660,15 @@ func (nm *NodeWatcherImpl) printLatencyToPeriodic() {
 	ticker := time.NewTicker(nm.conf.PrintLatencyToInterval)
 	for {
 		<-ticker.C
-		nm.watchingLock.RLock()
-		for _, watchedPeer := range nm.watching {
+		nm.watching.Range(func(k, v interface{}) bool {
+			watchedPeer := v.(nodeWatchingValue)
 			select {
 			case <-watchedPeer.enoughSamples:
-				if watchedPeer.peerConn == nil {
-					nm.logger.Infof("Node %s: , Conntype: <nil>, PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.Peer.String(), watchedPeer.Detector.Phi(), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
-				} else {
-					nm.logger.Infof("Node %s: , Conntype: %s, PHI: %f, Latency: %d, Subscribers: %d ", watchedPeer.Peer.String(), reflect.TypeOf(watchedPeer.peerConn), watchedPeer.Detector.Phi(), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
-				}
+				nm.logger.Infof("Node %s:, PHI: %f, Latency: %d, Subscribers: %d", watchedPeer.Peer.String(), watchedPeer.Detector.Phi(), watchedPeer.LatencyCalc.CurrValue(), len(watchedPeer.subscribers))
 			default:
 			}
-		}
-		nm.watchingLock.RUnlock()
-	}
+			return true
+		})
 
+	}
 }
