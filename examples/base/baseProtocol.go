@@ -6,6 +6,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/sirupsen/logrus"
 )
 
@@ -15,6 +16,7 @@ const name = "<replace-me>"
 type BaseProtocol struct {
 	contact peer.Peer
 	logger  *logrus.Logger
+	babel   protocolManager.ProtocolManager
 }
 
 func NewBaseProtocol(contact peer.Peer) protocol.Protocol {

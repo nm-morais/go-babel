@@ -10,6 +10,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	"github.com/sirupsen/logrus"
 )
@@ -33,14 +34,16 @@ type TimerQueue interface {
 }
 
 type timerQueueImpl struct {
+	babel           protocolManager.ProtocolManager
 	pq              priorityqueue.PriorityQueue
 	addTimerChan    chan *priorityqueue.Item
 	cancelTimerChan chan *cancelTimerReq
 	logger          *logrus.Logger
 }
 
-func NewTimerQueue() TimerQueue {
+func NewTimerQueue(protoManager protocolManager.ProtocolManager) TimerQueue {
 	tq := &timerQueueImpl{
+		babel:           protoManager,
 		pq:              make(priorityqueue.PriorityQueue, 0),
 		addTimerChan:    make(chan *priorityqueue.Item),
 		cancelTimerChan: make(chan *cancelTimerReq),
@@ -146,9 +149,7 @@ LOOP:
 		case <-currTimer.C:
 			// tq.logger.Infof("Processing timer %+v", *nextItem)
 			value := nextItem.Value.(*pqItemValue)
-			if proto, ok := p.protocols.Load(value.protoID); ok {
-				proto.(protocolValueType).DeliverTimer(value.timer)
-			}
+			tq.babel.DeliverTimer(value.timer, value.protoID)
 			//tq.pq.LogEntries(tq.logger)
 		}
 	}

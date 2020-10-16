@@ -36,16 +36,19 @@ func main() {
 		analyticsPortVar = rand.Intn(maxAnalyticsPort-minAnalyticsPort) + minAnalyticsPort
 	}
 
+	smConfig := pkg.StreamManagerConf{
+		DialTimeout: 3 * time.Second,
+	}
+
 	config := pkg.ProtocolManagerConfig{
 		LogFolder:        "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
 		HandshakeTimeout: 1 * time.Second,
-		DialTimeout:      1 * time.Second,
 		Peer:             peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(protosPortVar), uint16(analyticsPortVar)),
 	}
 
-	pkg.InitProtoManager(config)
+	p := pkg.NewProtoManager(config, smConfig)
 	contactNode := peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(1200), uint16(1200))
-	pkg.RegisterListenAddr(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())})
-	pkg.RegisterProtocol(NewPingPongProtocol(contactNode))
-	pkg.Start()
+	p.RegisterListenAddr(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())})
+	p.RegisterProtocol(NewPingPongProtocol(contactNode, p))
+	p.Start()
 }

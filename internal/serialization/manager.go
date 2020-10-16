@@ -2,8 +2,9 @@ package serialization
 
 import (
 	"fmt"
-	"github.com/nm-morais/go-babel/pkg/message"
 	"sync"
+
+	"github.com/nm-morais/go-babel/pkg/message"
 )
 
 type Manager struct {

@@ -63,34 +63,24 @@ func main() {
 		analyticsPortVar = rand.Intn(maxAnalyticsPort-minAnalyticsPort) + minAnalyticsPort
 	}
 
+	smConf := pkg.StreamManagerConf{
+		DialTimeout: 3 * time.Second,
+	}
+
 	protoManagerConf := pkg.ProtocolManagerConfig{
 		LogFolder:        "/Users/nunomorais/go/src/github.com/nm-morais/go-babel/logs/",
 		HandshakeTimeout: 1 * time.Second,
-		DialTimeout:      1 * time.Second,
 		Peer:             peer.NewPeer(net.IPv4(127, 0, 0, 1), uint16(protosPortVar), uint16(analyticsPortVar)),
 	}
 
-	fmt.Println("Self peer: ", protoManagerConf.Peer.String())
-	nodeWatcherConf := pkg.NodeWatcherConf{
-		MaxRedials:              3,
-		HbTickDuration:          1 * time.Second,
-		NewLatencyWeight:        0.1,
-		NrTestMessagesToSend:    3,
-		NrTestMessagesToReceive: 1,
-		OldLatencyWeight:        0.9,
-		TcpTestTimeout:          5 * time.Second,
-		UdpTestTimeout:          5 * time.Second,
-		WindowSize:              5,
-	}
 	contactNode := peer.NewPeer(net.IPv4(127, 0, 0, 1), uint16(1200), uint16(1201))
 
 	fmt.Println(fmt.Sprintf("Contact node IP %s", contactNode.IP()))
 	fmt.Println(fmt.Sprintf("Contact node %+v", contactNode))
 
-	pkg.InitProtoManager(protoManagerConf)
-	pkg.RegisterListenAddr(&net.TCPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
-	pkg.RegisterListenAddr(&net.UDPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
-	pkg.InitNodeWatcher(nodeWatcherConf)
-	pkg.RegisterProtocol(NewHyparviewProtocol(contactNode))
-	pkg.Start()
+	p := pkg.NewProtoManager(protoManagerConf, smConf)
+	p.RegisterListenAddr(&net.TCPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
+	p.RegisterListenAddr(&net.UDPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
+	p.RegisterProtocol(NewHyparviewProtocol(contactNode, p))
+	p.Start()
 }
