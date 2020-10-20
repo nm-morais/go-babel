@@ -42,6 +42,7 @@ type ProtocolManager interface {
 	RegisterNotificationHandler(protoID protocol.ID, notification notification.Notification, handler handlers.NotificationHandler) errors.Error
 	RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.TimerHandler) errors.Error
 	RegisterRequestHandler(protoID protocol.ID, request request.ID, handler handlers.RequestHandler) errors.Error
+	RegisterRequestReplyHandler(protoID protocol.ID, replyId request.ID, handler handlers.ReplyHandler) errors.Error
 	RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) errors.Error
 
 	CancelTimer(timerID int) errors.Error

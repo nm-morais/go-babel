@@ -477,19 +477,19 @@ func (h *Hyparview) dialNodeToActiveView(peer Peer) {
 
 func (h *Hyparview) addPeerToActiveView(newPeer Peer) {
 	if PeersEqual(h.babel.SelfPeer(), newPeer) {
-		panic("Trying to self to active view")
+		h.logger.Panic("Trying to self to active view")
 	}
 
 	if h.isActiveViewFull() {
-		panic("Cannot add node to active pool because it is full")
+		h.logger.Panic("Cannot add node to active pool because it is full")
 	}
 
 	if h.isPeerInView(newPeer, h.activeView) {
-		panic("Trying to add node already in view")
+		h.logger.Panic("Trying to add node already in view")
 	}
 
 	if h.isPeerInView(newPeer, h.passiveView) {
-		panic("Trying to add node to active view already in passive view")
+		h.logger.Panic("Trying to add node to active view already in passive view")
 	}
 
 	h.logger.Warnf("Added peer %s to active view", newPeer.String())
@@ -500,19 +500,19 @@ func (h *Hyparview) addPeerToActiveView(newPeer Peer) {
 func (h *Hyparview) addPeerToPassiveView(newPeer Peer) {
 
 	if h.isPassiveViewFull() {
-		panic("Trying to add node to view when view is full")
+		h.logger.Panic("Trying to add node to view when view is full")
 	}
 
 	if PeersEqual(newPeer, h.babel.SelfPeer()) {
-		panic("trying to add self to passive view ")
+		h.logger.Panic("trying to add self to passive view ")
 	}
 
 	if h.isPeerInView(newPeer, h.passiveView) {
-		panic("Trying to add node already in view")
+		h.logger.Panic("Trying to add node already in view")
 	}
 
 	if h.isPeerInView(newPeer, h.activeView) {
-		panic("Trying to add node to passive view already in active view")
+		h.logger.Panic("Trying to add node to passive view already in active view")
 	}
 
 	h.logger.Warnf("Added peer %s to passive view", newPeer.String())

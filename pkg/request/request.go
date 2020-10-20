@@ -7,6 +7,5 @@ type Request interface {
 }
 
 type Reply interface {
-	Request()
 	ID() ID
 }

@@ -123,6 +123,15 @@ func (p *protoManager) RegisterRequestHandler(protoID protocol.ID, request reque
 	return nil
 }
 
+func (p *protoManager) RegisterRequestReplyHandler(protoID protocol.ID, request request.ID, handler handlers.ReplyHandler) errors.Error {
+	proto, ok := p.protocols.Load(protoID)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", protoID)
+	}
+	proto.(protocolValueType).RegisterRequestReplyHandler(request, handler)
+	return nil
+}
+
 func (p *protoManager) RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
@@ -181,19 +190,19 @@ func (p *protoManager) SendMessageAndDisconnect(toSend message.Message, destPeer
 }
 
 func (p *protoManager) SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
-	_, ok := p.protocols.Load(origin)
+	originProto, ok := p.protocols.Load(origin)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
 	}
-	proto, ok := p.protocols.Load(destination)
+	destProto, ok := p.protocols.Load(destination)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
 	}
 
 	go func() {
-		respChan := proto.(protocolValueType).DeliverRequest(request)
+		respChan := destProto.(protocolValueType).DeliverRequest(request)
 		reply := <-respChan
-		proto.(protocolValueType).DeliverRequestReply(reply)
+		originProto.(protocolValueType).DeliverRequestReply(reply)
 	}()
 	return nil
 }
@@ -292,7 +301,8 @@ func (p *protoManager) setupLoggers() {
 	if err != nil {
 		log.Panic(err)
 	}
-	all := io.MultiWriter(os.Stdout, allLogsFile)
+	// all := io.MultiWriter(os.Stdout, allLogsFile)
+	all := io.MultiWriter(allLogsFile)
 
 	p.protocols.Range(func(key, proto interface{}) bool {
 		protoName := proto.(protocolValueType).Name()
@@ -346,6 +356,25 @@ func (p *protoManager) CancelTimer(timerID int) errors.Error {
 
 func (p *protoManager) RegisterTimer(origin protocol.ID, timer timer.Timer) int {
 	return p.tq.AddTimer(timer, origin)
+}
+
+func (p *protoManager) StartBackground() {
+	p.setupLoggers()
+	for _, l := range p.listenAddrs {
+		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
+		done := p.streamManager.AcceptConnectionsAndNotify(l)
+		<-done
+	}
+
+	p.protocols.Range(func(_, proto interface{}) bool {
+		proto.(protocolValueType).Init()
+		return true
+	})
+
+	p.protocols.Range(func(_, proto interface{}) bool {
+		go proto.(protocolValueType).Start()
+		return true
+	})
 }
 
 func (p *protoManager) Start() {

@@ -97,7 +97,7 @@ func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
 	}
 	newEventQueue, err := blockingqueue.NewArrayBlockingQueue(QueueSize)
 	if err != nil {
-		panic(err)
+		wp.Logger().Panic(err)
 	}
 
 	wp.eventQueue = newEventQueue
@@ -109,13 +109,13 @@ func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
 
 func (pw WrapperProtocol) DeliverRequestReply(reply request.Reply) {
 	if _, err := pw.eventQueue.Put(NewEvent(requestReplyEvent, reply)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
 func (pw WrapperProtocol) DeliverNotification(notification notification.Notification) {
 	if _, err := pw.eventQueue.Put(NewEvent(notificationEvent, notification)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
@@ -125,13 +125,13 @@ func (pw WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) 
 		message: msg,
 	}))
 	if err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
 func (pw WrapperProtocol) DeliverTimer(timer timer.Timer) {
 	if _, err := pw.eventQueue.Put(NewEvent(timerEvent, timer)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
@@ -141,7 +141,7 @@ func (pw WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Rep
 		respChan: make(chan request.Reply),
 	}
 	if _, err := pw.eventQueue.Put(NewEvent(requestEvent, aux)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 	return aux.respChan
 }
@@ -153,7 +153,7 @@ func (pw WrapperProtocol) MessageDelivered(message message.Message, peer peer.Pe
 		peer:    peer,
 		message: message,
 	})); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
@@ -164,7 +164,7 @@ func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.
 		message: message,
 		err:     error,
 	})); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
@@ -175,7 +175,7 @@ func (pw WrapperProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Pee
 		respChan:    make(chan bool),
 	}
 	if _, err := pw.eventQueue.Put(NewEvent(inConnRequestedEvent, event)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 
 	reply := <-event.respChan
@@ -189,7 +189,7 @@ func (pw WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) b
 		respChan:     make(chan bool),
 	}
 	if _, err := pw.eventQueue.Put(NewEvent(dialSuccessEvent, event)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 
 	reply := <-event.respChan
@@ -198,13 +198,13 @@ func (pw WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) b
 
 func (pw WrapperProtocol) DialFailed(peer peer.Peer) {
 	if _, err := pw.eventQueue.Put(NewEvent(dialFailedEvent, peer)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
 func (pw WrapperProtocol) OutConnDown(peer peer.Peer) {
 	if _, err := pw.eventQueue.Put(NewEvent(outConnDownEvent, peer)); err != nil {
-		panic(err)
+		pw.Logger().Panic(err)
 	}
 }
 
@@ -227,7 +227,7 @@ func (pw WrapperProtocol) handleChannels() {
 	for {
 		nextEventInterface, err := pw.eventQueue.Get()
 		if err != nil {
-			panic(err)
+			pw.Logger().Panic(err)
 		}
 		nextEvent := nextEventInterface.(*event)
 		switch nextEvent.eventype {
@@ -260,7 +260,7 @@ func (pw WrapperProtocol) handleChannels() {
 		case notificationEvent:
 			pw.handleNotification(nextEvent.eventContent.(notification.Notification))
 		default:
-			panic("unregistered id of event")
+			pw.Logger().Panic("unregistered id of event")
 		}
 	}
 }
@@ -270,7 +270,7 @@ func (pw WrapperProtocol) handleChannels() {
 func (pw WrapperProtocol) handleNotification(notification notification.Notification) {
 	handler, ok := pw.notificationHandlers[notification.ID()]
 	if !ok {
-		panic("notification handler not found")
+		pw.Logger().Panic("notification handler not found")
 	}
 	handler(notification)
 }
@@ -278,15 +278,15 @@ func (pw WrapperProtocol) handleNotification(notification notification.Notificat
 func (pw WrapperProtocol) handleTimer(timer timer.Timer) {
 	handler, ok := pw.timerHandlers[timer.ID()]
 	if !ok {
-		panic("timer handler not found")
+		pw.Logger().Panic("timer handler not found")
 	}
 	handler(timer)
 }
 
 func (pw WrapperProtocol) handleReply(reply request.Reply) {
-	handler, ok := pw.requestHandlers[reply.ID()]
+	handler, ok := pw.replyHandlers[reply.ID()]
 	if !ok {
-		panic("reply handler not found")
+		pw.Logger().Panic("reply handler not found")
 	}
 	handler(reply)
 }
@@ -294,7 +294,7 @@ func (pw WrapperProtocol) handleReply(reply request.Reply) {
 func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
-		panic(fmt.Sprintf("message handler for message id %d not found in protocol %d", receivedMsg.Type(), pw.id))
+		pw.Logger().Panic(fmt.Sprintf("message handler for message id %d not found in protocol %d", receivedMsg.Type(), pw.id))
 	}
 	handler(peer, receivedMsg)
 }
@@ -302,7 +302,7 @@ func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Mess
 func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
 	handler, ok := pw.requestHandlers[request.ID()]
 	if !ok {
-		panic(errors.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
+		pw.Logger().Panic(errors.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
 	}
 	return handler(request)
 }

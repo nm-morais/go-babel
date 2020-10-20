@@ -129,13 +129,14 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 		case *net.TCPAddr:
 			listener, err := net.ListenTCP(lAddr.Network(), lAddr)
 			if err != nil {
-				panic(err)
+				sm.logger.Panic(err)
 			}
 			close(done)
 			for {
+				sm.logger.Infof("Listening on addr: %s", lAddr)
 				newStream, err := listener.Accept()
 				if err != nil {
-					panic(err)
+					sm.logger.Panic(err)
 				}
 				go func() {
 					frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStream)
@@ -153,7 +154,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 						return
 					}
 
-					sm.logger.Warnf("New connection from %s", remotePeer.String())
+					sm.logger.Infof("New connection from %s", remotePeer.String())
 					if !sm.babel.InConnRequested(handshakeMsg.DialerProto, remotePeer) {
 						frameBasedConn.Close()
 						sm.inboundTransports.Delete(remotePeer.String())
@@ -181,7 +182,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 			deserializer := internalMsg.AppMessageWrapperSerializer{}
 			packetConn, err := net.ListenUDP(lAddr.Network(), lAddr)
 			if err != nil {
-				panic(err)
+				sm.logger.Panic(err)
 			}
 			sm.udpConn = packetConn
 			close(done)
@@ -189,7 +190,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				msgBytes := make([]byte, 2048)
 				n, _, err := packetConn.ReadFrom(msgBytes)
 				if err != nil {
-					panic(err)
+					sm.logger.Panic(err)
 				}
 				sender := &peer.IPeer{}
 				msgBuf := msgBytes[:n]
@@ -203,7 +204,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				sm.babel.DeliverMessage(sender, appMsg, protoMsg.DestProto)
 			}
 		default:
-			panic("cannot listen in such addr")
+			sm.logger.Panic("cannot listen in such addr")
 		}
 	}()
 	return done
@@ -270,7 +271,6 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 			}
 
 			if !sm.babel.DialSuccess(dialingProto, toDial) {
-				sm.dialingTransportsMutex.Unlock()
 				sm.logger.Error("No protocol accepted conn")
 				frameBasedConn.Close()
 				close(newOutboundTransport.DialErr)
@@ -383,7 +383,7 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.Fra
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 
 	if newPeer.String() == sm.babel.SelfPeer().String() {
-		panic("Dialing self")
+		sm.logger.Panic("Dialing self")
 	}
 
 	//sm.logger.Info("Reading from tmp stream")

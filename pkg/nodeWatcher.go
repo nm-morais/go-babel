@@ -122,7 +122,7 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 	}
 
 	if nm.conf.OldLatencyWeight+nm.conf.NewLatencyWeight != 1 {
-		panic("OldLatencyWeight + NewLatencyWeight != 1")
+		nm.logger.Panic("OldLatencyWeight + NewLatencyWeight != 1")
 	}
 
 	listenAddr := &net.UDPAddr{
@@ -132,7 +132,7 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 
 	udpConn, err := net.ListenUDP("udp", listenAddr)
 	if err != nil {
-		panic(err)
+		nm.logger.Panic(err)
 	}
 	nm.udpConn = *udpConn
 	nm.logger.Infof("My configs: %+v", config)
@@ -156,7 +156,7 @@ func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, nodeInfo *NodeI
 
 func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Error {
 	if reflect.ValueOf(p).IsNil() {
-		panic("Tried to watch nil peer")
+		nm.logger.Panic("Tried to watch nil peer")
 	}
 	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.String())
 	if _, ok := nm.watching.Load(p.String()); ok {
@@ -165,7 +165,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 	var nrMessages int32 = 0
 	detector, err := analytics.New(nm.conf.PhiThreshold, uint(nm.conf.WindowSize), nm.conf.MinStdDeviation, nm.conf.AcceptableHbPause, nm.conf.FirstHeartbeatEstimate, nil)
 	if err != nil {
-		panic(err)
+		nm.logger.Panic(err)
 	}
 	nodeInfo := &NodeInfoImpl{
 		nrMessagesReceived: &nrMessages,
@@ -185,7 +185,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto protocol.ID, latency time.Duration) errors.Error {
 	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.String(), latency)
 	if reflect.ValueOf(p).IsNil() {
-		panic("Tried to watch nil peer")
+		nm.logger.Panic("Tried to watch nil peer")
 	}
 	if _, ok := nm.watching.Load(p.String()); ok {
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
@@ -193,7 +193,7 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 	var nrMessages int32 = 0
 	detector, err := analytics.New(nm.conf.PhiThreshold, uint(nm.conf.WindowSize), nm.conf.MinStdDeviation, nm.conf.AcceptableHbPause, nm.conf.FirstHeartbeatEstimate, nil)
 	if err != nil {
-		panic(err)
+		nm.logger.Panic(err)
 	}
 	newNodeInfo := &NodeInfoImpl{
 		nrMessagesReceived: &nrMessages,
@@ -224,7 +224,7 @@ func (nm *NodeWatcherImpl) startHbRoutine(nodeInfo *NodeInfoImpl) {
 		for i := 0; i < nm.conf.NrMessagesWithoutWait; i++ {
 			_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(toSend), rAddrUdp)
 			if err != nil {
-				panic("err in udp conn")
+				nm.logger.Panic("err in udp conn")
 			}
 		}
 		for {
@@ -330,7 +330,7 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 		//nm.logger.Infof("Writing test message to: %s", p.ToString())
 		_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(analytics.NewHBMessageForceReply(nm.selfPeer, true)), rAddrUdp)
 		if err != nil {
-			panic(err)
+			nm.logger.Panic(err)
 		}
 	}
 
@@ -378,13 +378,13 @@ func (nm *NodeWatcherImpl) startTCPServer() {
 
 	listener, err := net.ListenTCP("tcp", listenAddr)
 	if err != nil {
-		panic(err)
+		nm.logger.Panic(err)
 	}
 
 	for {
 		newStream, err := listener.AcceptTCP()
 		if err != nil {
-			panic(err)
+			nm.logger.Panic(err)
 		}
 		go nm.handleTCPConnection(newStream)
 	}
@@ -439,7 +439,8 @@ func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.Frame
 		}
 		return nil
 	}
-	panic("Should not be here")
+	nm.logger.Panic("Should not be here")
+	return nil
 }
 
 func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
@@ -474,7 +475,8 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 		}
 		return nil
 	}
-	panic("Should not be here")
+	nm.logger.Panic("Should not be here")
+	return nil
 }
 
 func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage, nodeInfo *NodeInfoImpl) {
