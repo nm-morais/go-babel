@@ -180,10 +180,7 @@ func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) 
 }
 
 func (m *PingPongProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Peer) bool {
-	if dialerProto != m.ID() {
-		return false
-	}
-	return true
+	return dialerProto != m.ID()
 }
 
 func (m *PingPongProtocol) OutConnDown(peer peer.Peer) {

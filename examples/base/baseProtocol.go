@@ -14,15 +14,14 @@ const protoID = 1000
 const name = "<replace-me>"
 
 type BaseProtocol struct {
-	contact peer.Peer
-	logger  *logrus.Logger
-	babel   protocolManager.ProtocolManager
+	logger *logrus.Logger
+	babel  protocolManager.ProtocolManager
 }
 
-func NewBaseProtocol(contact peer.Peer) protocol.Protocol {
+func NewBaseProtocol(babel protocolManager.ProtocolManager) protocol.Protocol {
 	return &BaseProtocol{
-		contact: contact,
-		logger:  logs.NewLogger(name),
+		logger: logs.NewLogger(name),
+		babel:  babel,
 	}
 }
 
@@ -54,11 +53,11 @@ func (m *BaseProtocol) DialFailed(p peer.Peer) {
 }
 
 func (m *BaseProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	return false
+	return sourceProto != m.ID()
 }
 
 func (m *BaseProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Peer) bool {
-	return false
+	return dialerProto != m.ID()
 }
 
 func (m *BaseProtocol) OutConnDown(peer peer.Peer) {

@@ -9,7 +9,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
-	. "github.com/nm-morais/go-babel/pkg/peer"
+	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/nm-morais/go-babel/pkg/timer"
@@ -18,9 +18,9 @@ import (
 
 type Hyparview struct {
 	babel          protocolManager.ProtocolManager
-	contactNode    Peer
-	activeView     []Peer
-	passiveView    []Peer
+	contactNode    peer.Peer
+	activeView     []peer.Peer
+	passiveView    []peer.Peer
 	pendingDials   map[string]bool
 	lastShuffleMsg ShuffleMessage
 	timeStart      time.Time
@@ -39,11 +39,11 @@ const Ka = 3
 const Kp = 2
 const name = "Hyparview"
 
-func NewHyparviewProtocol(contactNode Peer, babel protocolManager.ProtocolManager) protocol.Protocol {
+func NewHyparviewProtocol(contactNode peer.Peer, babel protocolManager.ProtocolManager) protocol.Protocol {
 	return &Hyparview{
 		contactNode:  contactNode,
-		activeView:   make([]Peer, 0, activeViewSize),
-		passiveView:  make([]Peer, 0, passiveViewSize),
+		activeView:   make([]peer.Peer, 0, activeViewSize),
+		passiveView:  make([]peer.Peer, 0, passiveViewSize),
 		pendingDials: make(map[string]bool),
 		logger:       logs.NewLogger(name),
 	}
@@ -76,7 +76,7 @@ func (h *Hyparview) Init() {
 func (h *Hyparview) Start() {
 	h.timeStart = time.Now()
 	h.babel.RegisterTimer(h.ID(), ShuffleTimer{deadline: time.Now().Add(3 * time.Second)})
-	if PeersEqual(h.babel.SelfPeer(), h.contactNode) {
+	if peer.PeersEqual(h.babel.SelfPeer(), h.contactNode) {
 		return
 	}
 	toSend := JoinMessage{}
@@ -84,7 +84,7 @@ func (h *Hyparview) Start() {
 	h.babel.SendMessageSideStream(toSend, h.contactNode, h.contactNode.ToTCPAddr(), protoID, protoID)
 }
 
-func (h *Hyparview) InConnRequested(dialerProto protocol.ID, peer Peer) bool {
+func (h *Hyparview) InConnRequested(dialerProto protocol.ID, peer peer.Peer) bool {
 	if dialerProto != h.ID() {
 		return false
 	}
@@ -100,20 +100,20 @@ func (h *Hyparview) InConnRequested(dialerProto protocol.ID, peer Peer) bool {
 	return true
 }
 
-func (h *Hyparview) OutConnDown(peer Peer) {
-	h.dropPeerFromActiveView(peer.(Peer))
-	h.logger.Errorf("Peer %s down", peer.String())
+func (h *Hyparview) OutConnDown(p peer.Peer) {
+	h.dropPeerFromActiveView(p.(peer.Peer))
+	h.logger.Errorf("Peer %s down", p.String())
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer Peer) bool {
-	iPeer := peer.(Peer)
-	delete(h.pendingDials, peer.String())
+func (h *Hyparview) DialSuccess(sourceProto protocol.ID, p peer.Peer) bool {
+	iPeer := p.(peer.Peer)
+	delete(h.pendingDials, p.String())
 	if sourceProto != h.ID() {
 		return false
 	}
 
-	if h.isPeerInView(peer, h.activeView) {
+	if h.isPeerInView(p, h.activeView) {
 		h.logger.Info("Dialed node is already on active view")
 		return true
 	}
@@ -129,13 +129,13 @@ func (h *Hyparview) DialSuccess(sourceProto protocol.ID, peer Peer) bool {
 	return true
 }
 
-func (h *Hyparview) DialFailed(peer Peer) {
+func (h *Hyparview) DialFailed(peer peer.Peer) {
 	delete(h.pendingDials, peer.String())
 	h.logger.Errorf("Failed to dial peer %s", peer.String())
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) MessageDelivered(message message.Message, peer Peer) {
+func (h *Hyparview) MessageDelivered(message message.Message, peer peer.Peer) {
 	if message.Type() == DisconnectMessageType {
 		h.babel.Disconnect(h.ID(), peer)
 		h.logger.Infof("Disconnecting from %s", peer.String())
@@ -143,23 +143,23 @@ func (h *Hyparview) MessageDelivered(message message.Message, peer Peer) {
 	h.logger.Infof("Message %+v was sent to %s", message, peer.String())
 }
 
-func (h *Hyparview) MessageDeliveryErr(message message.Message, peer Peer, error errors.Error) {
+func (h *Hyparview) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
 	h.logger.Warnf("Message %s was not sent to %s because: %s", reflect.TypeOf(message), peer.String(), error.Reason())
 }
 
 // ---------------- Protocol handlers (messages) ----------------
 
-func (h *Hyparview) HandleJoinMessage(sender Peer, message message.Message) {
+func (h *Hyparview) HandleJoinMessage(sender peer.Peer, message message.Message) {
 	h.logger.Info("Received join message")
 	if h.isActiveViewFull() {
 		h.dropRandomElemFromActiveView()
 	}
-	iPeer := sender.(Peer)
+	iPeer := sender.(peer.Peer)
 	h.dialNodeToActiveView(iPeer)
 	if len(h.activeView) > 0 {
 		toSend := ForwardJoinMessage{
 			TTL:            ARWL,
-			OriginalSender: sender.(Peer),
+			OriginalSender: sender.(peer.Peer),
 		}
 		for _, activePeer := range h.activeView {
 			h.logger.Infof("Sending ForwardJoin (original=%s) message to: %s", sender.String(), activePeer.String())
@@ -170,9 +170,9 @@ func (h *Hyparview) HandleJoinMessage(sender Peer, message message.Message) {
 	}
 }
 
-func (h *Hyparview) HandleForwardJoinMessage(sender Peer, message message.Message) {
+func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.Message) {
 	fwdJoinMsg := message.(ForwardJoinMessage)
-	iPeer := sender.(Peer)
+	iPeer := sender.(peer.Peer)
 	h.logger.Infof("Received forward join message with ttl = %d from %s", fwdJoinMsg.TTL, sender.String())
 
 	if fwdJoinMsg.TTL == 0 || len(h.activeView) == 1 {
@@ -206,7 +206,7 @@ func (h *Hyparview) HandleForwardJoinMessage(sender Peer, message message.Messag
 	h.sendMessage(toSend, rndNodes[0])
 }
 
-func (h *Hyparview) HandleNeighbourMessage(sender Peer, message message.Message) {
+func (h *Hyparview) HandleNeighbourMessage(sender peer.Peer, message message.Message) {
 	h.logger.Info("Received neighbour message")
 	neighbourMsg := message.(NeighbourMessage)
 	if neighbourMsg.HighPrio {
@@ -232,15 +232,15 @@ func (h *Hyparview) HandleNeighbourMessage(sender Peer, message message.Message)
 	}
 }
 
-func (h *Hyparview) HandleNeighbourReplyMessage(sender Peer, message message.Message) {
+func (h *Hyparview) HandleNeighbourReplyMessage(sender peer.Peer, message message.Message) {
 	h.logger.Info("Received neighbour reply message")
 	neighbourReplyMsg := message.(NeighbourMessageReply)
 	if neighbourReplyMsg.Accepted {
-		h.dialNodeToActiveView(sender.(Peer))
+		h.dialNodeToActiveView(sender.(peer.Peer))
 	}
 }
 
-func (h *Hyparview) HandleShuffleMessage(sender Peer, message message.Message) {
+func (h *Hyparview) HandleShuffleMessage(sender peer.Peer, message message.Message) {
 	//h.logger.Info("Received shuffle message")
 	shuffleMsg := message.(ShuffleMessage)
 	if shuffleMsg.TTL > 0 {
@@ -251,7 +251,7 @@ func (h *Hyparview) HandleShuffleMessage(sender Peer, message message.Message) {
 				Peers: shuffleMsg.Peers,
 			}
 			h.lastShuffleMsg = toSend
-			rndNodes := h.getRandomElementsFromView(1, h.activeView, h.babel.SelfPeer().(Peer), sender.(Peer))
+			rndNodes := h.getRandomElementsFromView(1, h.activeView, h.babel.SelfPeer().(peer.Peer), sender.(peer.Peer))
 			if len(rndNodes) != 0 {
 				//h.logger.Info("Forwarding shuffle message to :", rndNodes[0].ToString())
 				h.sendMessage(toSend, rndNodes[0])
@@ -262,12 +262,7 @@ func (h *Hyparview) HandleShuffleMessage(sender Peer, message message.Message) {
 	//h.logger.Warn("Accepting shuffle message")
 	// TTL is 0 or have no nodes to forward to
 	// select random nr of hosts from passive view
-	var exclusions []Peer
-	for _, p := range shuffleMsg.Peers {
-		exclusions = append(exclusions, p)
-	}
-	exclusions = append(exclusions, h.babel.SelfPeer().(Peer), sender.(Peer))
-
+	exclusions := append(shuffleMsg.Peers, h.babel.SelfPeer().(peer.Peer), sender.(peer.Peer))
 	toSend := h.getRandomElementsFromView(len(shuffleMsg.Peers), h.passiveView, exclusions...)
 	for _, receivedHost := range shuffleMsg.Peers {
 		if h.babel.SelfPeer().String() == receivedHost.String() {
@@ -299,7 +294,7 @@ func (h *Hyparview) HandleShuffleMessage(sender Peer, message message.Message) {
 	h.sendMessageTmpTransport(reply, sender)
 }
 
-func (h *Hyparview) HandleShuffleReplyMessage(sender Peer, m message.Message) {
+func (h *Hyparview) HandleShuffleReplyMessage(sender peer.Peer, m message.Message) {
 	h.logger.Info("Received shuffle reply message")
 	shuffleReplyMsg := m.(ShuffleReplyMessage)
 
@@ -340,7 +335,7 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 	h.babel.RegisterTimer(h.ID(), ShuffleTimer{deadline: time.Now().Add(toWait * time.Millisecond)})
 
 	if time.Since(h.timeStart) > joinTime {
-		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !PeersEqual(h.babel.SelfPeer(), h.contactNode) {
+		if len(h.activeView) == 0 && len(h.passiveView) == 0 && !peer.PeersEqual(h.babel.SelfPeer(), h.contactNode) {
 			toSend := JoinMessage{}
 			h.pendingDials[h.contactNode.String()] = true
 			h.babel.SendMessageSideStream(toSend, h.contactNode, h.contactNode.ToUDPAddr(), protoID, protoID)
@@ -363,7 +358,7 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 	passiveViewRandomPeers := h.getRandomElementsFromView(Kp-1, h.passiveView)
 	activeViewRandomPeers := h.getRandomElementsFromView(Ka, h.activeView)
 	peers := append(passiveViewRandomPeers, activeViewRandomPeers...)
-	peers = append(peers, h.babel.SelfPeer().(Peer))
+	peers = append(peers, h.babel.SelfPeer().(peer.Peer))
 	toSend := ShuffleMessage{
 		TTL:   PRWL,
 		Peers: peers,
@@ -374,9 +369,9 @@ func (h *Hyparview) HandleShuffleTimer(timer timer.Timer) {
 	h.sendMessage(toSend, rndNode)
 }
 
-func (h *Hyparview) HandleDisconnectMessage(sender Peer, m message.Message) {
+func (h *Hyparview) HandleDisconnectMessage(sender peer.Peer, m message.Message) {
 	h.logger.Warn("Got Disconnect message")
-	iPeer := sender.(Peer)
+	iPeer := sender.(peer.Peer)
 	h.dropPeerFromActiveView(iPeer)
 	if h.isPassiveViewFull() {
 		h.dropRandomElemFromPassiveView()
@@ -408,21 +403,21 @@ func (h *Hyparview) logHyparviewState() {
 	h.logger.Info("-------------------------------------------")
 }
 
-func (h *Hyparview) getRandomElementsFromView(amount int, view []Peer, exclusions ...Peer) []Peer {
+func (h *Hyparview) getRandomElementsFromView(amount int, view []peer.Peer, exclusions ...peer.Peer) []peer.Peer {
 
-	dest := make([]Peer, len(view))
+	dest := make([]peer.Peer, len(view))
 	perm := rand.Perm(len(view))
 	for i, v := range perm {
 		dest[v] = view[i]
 	}
 
-	var toSend []Peer
+	var toSend []peer.Peer
 
 	for i := 0; i < len(dest) && len(toSend) < amount; i++ {
 		excluded := false
 		curr := dest[i]
 		for _, exclusion := range exclusions {
-			if PeersEqual(exclusion, curr) { // skip exclusions
+			if peer.PeersEqual(exclusion, curr) { // skip exclusions
 				excluded = true
 				break
 			}
@@ -435,18 +430,18 @@ func (h *Hyparview) getRandomElementsFromView(amount int, view []Peer, exclusion
 	return toSend
 }
 
-func (h *Hyparview) isPeerInView(target Peer, view []Peer) bool {
+func (h *Hyparview) isPeerInView(target peer.Peer, view []peer.Peer) bool {
 	for _, p := range view {
-		if PeersEqual(p, target) {
+		if peer.PeersEqual(p, target) {
 			return true
 		}
 	}
 	return false
 }
 
-func (h *Hyparview) dropPeerFromActiveView(target Peer) bool {
+func (h *Hyparview) dropPeerFromActiveView(target peer.Peer) bool {
 	for i, p := range h.activeView {
-		if PeersEqual(p, target) {
+		if peer.PeersEqual(p, target) {
 			h.activeView = append(h.activeView[:i], h.activeView[i+1:]...)
 			return true
 		}
@@ -454,9 +449,9 @@ func (h *Hyparview) dropPeerFromActiveView(target Peer) bool {
 	return false
 }
 
-func (h *Hyparview) dropPeerFromPassiveView(target Peer) bool {
+func (h *Hyparview) dropPeerFromPassiveView(target peer.Peer) bool {
 	for i, p := range h.passiveView {
-		if PeersEqual(p, target) {
+		if peer.PeersEqual(p, target) {
 			h.passiveView = append(h.passiveView[:i], h.passiveView[i+1:]...)
 			return true
 		}
@@ -465,7 +460,7 @@ func (h *Hyparview) dropPeerFromPassiveView(target Peer) bool {
 	return false
 }
 
-func (h *Hyparview) dialNodeToActiveView(peer Peer) {
+func (h *Hyparview) dialNodeToActiveView(peer peer.Peer) {
 	if h.isPeerInView(peer, h.activeView) || h.pendingDials[peer.String()] {
 		return
 	}
@@ -475,8 +470,8 @@ func (h *Hyparview) dialNodeToActiveView(peer Peer) {
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) addPeerToActiveView(newPeer Peer) {
-	if PeersEqual(h.babel.SelfPeer(), newPeer) {
+func (h *Hyparview) addPeerToActiveView(newPeer peer.Peer) {
+	if peer.PeersEqual(h.babel.SelfPeer(), newPeer) {
 		h.logger.Panic("Trying to self to active view")
 	}
 
@@ -497,13 +492,13 @@ func (h *Hyparview) addPeerToActiveView(newPeer Peer) {
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) addPeerToPassiveView(newPeer Peer) {
+func (h *Hyparview) addPeerToPassiveView(newPeer peer.Peer) {
 
 	if h.isPassiveViewFull() {
 		h.logger.Panic("Trying to add node to view when view is full")
 	}
 
-	if PeersEqual(newPeer, h.babel.SelfPeer()) {
+	if peer.PeersEqual(newPeer, h.babel.SelfPeer()) {
 		h.logger.Panic("trying to add self to passive view ")
 	}
 
@@ -549,10 +544,10 @@ func (h *Hyparview) dropRandomElemFromPassiveView() {
 	h.logHyparviewState()
 }
 
-func (h *Hyparview) sendMessage(msg message.Message, target Peer) {
+func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
 	h.babel.SendMessage(msg, target, h.ID(), h.ID())
 }
 
-func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target Peer) {
+func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
 	h.babel.SendMessageSideStream(msg, target, target.ToTCPAddr(), h.ID(), h.ID())
 }

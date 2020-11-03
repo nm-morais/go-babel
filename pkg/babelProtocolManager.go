@@ -20,7 +20,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/nodeWatcher"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	. "github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/request"
 	"github.com/nm-morais/go-babel/pkg/serializationManager"
@@ -31,13 +30,14 @@ import (
 
 const ProtoManagerCaller = "ProtoManager"
 
-type ProtocolManagerConfig struct {
+type Config struct {
+	LogStdout        bool
 	Cpuprofile       bool
 	Memprofile       bool
 	LogFolder        string
 	HandshakeTimeout time.Duration
-	smConf           StreamManagerConf
-	Peer             Peer
+	SmConf           StreamManagerConf
+	Peer             peer.Peer
 }
 
 type protocolValueType = internalProto.WrapperProtocol
@@ -45,7 +45,7 @@ type protocolValueType = internalProto.WrapperProtocol
 type protoManager struct {
 	nw                   nodeWatcher.NodeWatcher
 	tq                   TimerQueue
-	config               ProtocolManagerConfig
+	config               Config
 	notificationHub      notificationHub.NotificationHub
 	serializationManager *serialization.Manager
 	protocols            *sync.Map
@@ -58,7 +58,7 @@ type protoManager struct {
 var protoMsgSerializer = internalMsg.ProtoHandshakeMessageSerializer{}
 var appMsgSerializer = internalMsg.AppMessageWrapperSerializer{}
 
-func NewProtoManager(configs ProtocolManagerConfig, smConf StreamManagerConf) *protoManager {
+func NewProtoManager(configs Config) *protoManager {
 	p := &protoManager{
 		config:               configs,
 		notificationHub:      notificationHub.NewNotificationHub(),
@@ -68,7 +68,7 @@ func NewProtoManager(configs ProtocolManagerConfig, smConf StreamManagerConf) *p
 		logger:               logs.NewLogger(ProtoManagerCaller),
 	}
 	p.tq = NewTimerQueue(p)
-	p.streamManager = NewStreamManager(p, p.config.smConf)
+	p.streamManager = NewStreamManager(p, p.config.SmConf)
 	return p
 }
 
@@ -146,7 +146,7 @@ func (p *protoManager) RegisterMessageHandler(protoID protocol.ID, message messa
 	return nil
 }
 
-func (p *protoManager) SendMessage(toSend message.Message, destPeer Peer, origin protocol.ID, destination protocol.ID) {
+func (p *protoManager) SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {
@@ -167,7 +167,7 @@ func (p *protoManager) SendMessage(toSend message.Message, destPeer Peer, origin
 	}()
 }
 
-func (p *protoManager) SendMessageAndDisconnect(toSend message.Message, destPeer Peer, origin protocol.ID, destination protocol.ID) {
+func (p *protoManager) SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {
@@ -237,15 +237,15 @@ func (p *protoManager) Dial(dialingProto protocol.ID, peer peer.Peer, toDial net
 	return p.streamManager.DialAndNotify(dialingProto, peer, toDial)
 }
 
-func (p *protoManager) Disconnect(source protocol.ID, toDc Peer) {
+func (p *protoManager) Disconnect(source protocol.ID, toDc peer.Peer) {
 	p.streamManager.Disconnect(source, toDc)
 }
 
-func (p *protoManager) SelfPeer() Peer {
+func (p *protoManager) SelfPeer() peer.Peer {
 	return p.config.Peer
 }
 
-func (p *protoManager) InConnRequested(targetProto protocol.ID, dialer Peer) bool {
+func (p *protoManager) InConnRequested(targetProto protocol.ID, dialer peer.Peer) bool {
 	if proto, ok := p.protocols.Load(targetProto); ok {
 		return proto.(protocolValueType).InConnRequested(targetProto, dialer)
 	}
@@ -268,7 +268,7 @@ func (p *protoManager) DeliverMessage(sender peer.Peer, message message.Message,
 	}
 }
 
-func (p *protoManager) DialError(sourceProto protocol.ID, dialedPeer Peer) {
+func (p *protoManager) DialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
 	callerProto, ok := p.protocols.Load(sourceProto)
 	if !ok {
 		p.logger.Panicf("Proto %d not found", sourceProto)
@@ -276,13 +276,13 @@ func (p *protoManager) DialError(sourceProto protocol.ID, dialedPeer Peer) {
 	callerProto.(protocolValueType).DialFailed(dialedPeer)
 }
 
-func (p *protoManager) DialSuccess(dialerProto protocol.ID, dialedPeer Peer) bool {
+func (p *protoManager) DialSuccess(dialerProto protocol.ID, dialedPeer peer.Peer) bool {
 	proto, _ := p.protocols.Load(dialerProto)
 	convertedProto := proto.(protocolValueType)
 	return convertedProto.DialSuccess(dialerProto, dialedPeer)
 }
 
-func (p *protoManager) OutTransportFailure(dialerProto protocol.ID, peer Peer) {
+func (p *protoManager) OutTransportFailure(dialerProto protocol.ID, peer peer.Peer) {
 	p.logger.Warn("Handling transport failure from ", peer.String())
 	proto, _ := p.protocols.Load(dialerProto)
 	proto.(protocolValueType).OutConnDown(peer)
@@ -290,13 +290,10 @@ func (p *protoManager) OutTransportFailure(dialerProto protocol.ID, peer Peer) {
 
 func (p *protoManager) setupLoggers() {
 	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
-
-	os.RemoveAll(logFolder)
 	err := os.Mkdir(logFolder, 0777)
 	if err != nil {
 		log.Panic(err)
 	}
-
 	allLogsFile, err := os.Create(logFolder + "all.log")
 	if err != nil {
 		log.Panic(err)

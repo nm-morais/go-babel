@@ -17,7 +17,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/nodeWatcher"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	. "github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/sirupsen/logrus"
@@ -268,7 +267,7 @@ func (nm *NodeWatcherImpl) startHbRoutine(nodeInfo *NodeInfoImpl) {
 	}
 }
 
-func (nm *NodeWatcherImpl) Unwatch(peer Peer, protoID protocol.ID) errors.Error {
+func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error {
 	nm.logger.Infof("Proto %d request to unwatch %s", protoID, peer.String())
 	watchedPeer, ok := nm.watching.Load(peer.String())
 	if !ok {
@@ -572,7 +571,7 @@ LOOP:
 			for idx, cond := range nm.conditions {
 				// nm.logger.Infof("cond: %+v", cond)
 				if cond != nil {
-					if PeersEqual(cond.Value.(nodeWatcher.Condition).Peer, toRemove) {
+					if peer.PeersEqual(cond.Value.(nodeWatcher.Condition).Peer, toRemove) {
 						heap.Remove(&nm.conditions, idx)
 					}
 				}
