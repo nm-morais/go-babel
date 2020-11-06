@@ -289,12 +289,11 @@ func (p *protoManager) OutTransportFailure(dialerProto protocol.ID, peer peer.Pe
 }
 
 func (p *protoManager) setupLoggers() {
-	logFolder := p.config.LogFolder + p.config.Peer.String() + "/"
-	err := os.Mkdir(logFolder, 0777)
+	err := os.MkdirAll(p.config.LogFolder, 0777)
 	if err != nil {
-		log.Panic(err)
+		log.Panic("Err creating dir", err)
 	}
-	allLogsFile, err := os.Create(logFolder + "all.log")
+	allLogsFile, err := os.Create(p.config.LogFolder + "/all.log")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -303,7 +302,7 @@ func (p *protoManager) setupLoggers() {
 
 	p.protocols.Range(func(key, proto interface{}) bool {
 		protoName := proto.(protocolValueType).Name()
-		protoFile, err := os.Create(logFolder + fmt.Sprintf("%s.log", protoName))
+		protoFile, err := os.Create(p.config.LogFolder + fmt.Sprintf("/%s.log", protoName))
 		if err != nil {
 			log.Panic(err)
 		}
@@ -313,14 +312,14 @@ func (p *protoManager) setupLoggers() {
 		return true
 	})
 
-	protoManagerFile, err := os.Create(logFolder + "protoManager.log")
+	protoManagerFile, err := os.Create(p.config.LogFolder + "/protoManager.log")
 	if err != nil {
 		log.Panic(err)
 	}
 	pmMw := io.MultiWriter(all, protoManagerFile)
 	p.logger.SetOutput(pmMw)
 
-	streamManagerFile, err := os.Create(logFolder + "streamManager.log")
+	streamManagerFile, err := os.Create(p.config.LogFolder + "/streamManager.log")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -328,7 +327,7 @@ func (p *protoManager) setupLoggers() {
 	smMw := io.MultiWriter(all, streamManagerFile)
 	streamManagerLogger.SetOutput(smMw)
 
-	timerQueueFile, err := os.Create(logFolder + "timerQueue.log")
+	timerQueueFile, err := os.Create(p.config.LogFolder + "/timerQueue.log")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -338,7 +337,7 @@ func (p *protoManager) setupLoggers() {
 
 	if p.nw != nil {
 		nodeWatcherLogger := p.nw.Logger()
-		nodeWatcherFile, err := os.Create(logFolder + "nodeWatcher.log")
+		nodeWatcherFile, err := os.Create(p.config.LogFolder + "/nodeWatcher.log")
 		if err != nil {
 			log.Panic(err)
 		}
