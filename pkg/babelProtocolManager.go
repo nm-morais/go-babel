@@ -31,7 +31,7 @@ import (
 const ProtoManagerCaller = "ProtoManager"
 
 type Config struct {
-	LogStdout        bool
+	Silent           bool
 	Cpuprofile       bool
 	Memprofile       bool
 	LogFolder        string
@@ -297,8 +297,11 @@ func (p *protoManager) setupLoggers() {
 	if err != nil {
 		log.Panic(err)
 	}
-	// all := io.MultiWriter(os.Stdout, allLogsFile)
 	all := io.MultiWriter(allLogsFile)
+
+	if !p.config.Silent {
+		all = io.MultiWriter(os.Stdout, all)
+	}
 
 	p.protocols.Range(func(key, proto interface{}) bool {
 		protoName := proto.(protocolValueType).Name()
