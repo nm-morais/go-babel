@@ -132,8 +132,8 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				sm.logger.Panic(err)
 			}
 			close(done)
+			sm.logger.Infof("Listening on addr: %s", lAddr)
 			for {
-				sm.logger.Infof("Listening on addr: %s", lAddr)
 				newStream, err := listener.Accept()
 				if err != nil {
 					sm.logger.Panic(err)
@@ -214,7 +214,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 	sm.logger.Warnf("Dialing: %s", toDial.String())
 
 	// check-lock-check
-	k := getKeyForProtoPeerPair(dialingProto, toDial)
+	k := getKeyForConn(dialingProto, toDial)
 	_, connUp := sm.outboundTransports.Load(k)
 	if connUp {
 		return errors.NonFatalError(500, "connection already up", streamManagerCaller)
@@ -301,7 +301,7 @@ func (sm *babelStreamManager) handleOutTransportFrameConn(dialingProto protocol.
 }
 
 func (sm *babelStreamManager) handleOutboundTransportFailure(dialingProto protocol.ID, t *outboundTransport, remotePeer peer.Peer) errors.Error {
-	k := getKeyForProtoPeerPair(dialingProto, remotePeer)
+	k := getKeyForConn(dialingProto, remotePeer)
 	sm.dialingTransportsMutex.Lock()
 	sm.outboundTransports.Delete(k)
 	sm.dialingTransportsMutex.Unlock()
@@ -311,7 +311,7 @@ func (sm *babelStreamManager) handleOutboundTransportFailure(dialingProto protoc
 
 func (sm *babelStreamManager) SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID) errors.Error {
 	sm.dialingTransportsMutex.RLock()
-	k := getKeyForProtoPeerPair(origin, destPeer)
+	k := getKeyForConn(origin, destPeer)
 	outboundStreamInt, ok := sm.outboundTransports.Load(k)
 	if !ok {
 		sm.dialingTransportsMutex.RUnlock()
@@ -322,7 +322,6 @@ func (sm *babelStreamManager) SendMessage(toSend message.Message, destPeer peer.
 	//p.logger.Infof("Sending message of type %s", reflect.TypeOf(toSend))
 	// p.logger.Infof("Sending (bytes): %+v", toSendBytes)
 	sm.dialingTransportsMutex.RUnlock()
-
 	select {
 	case <-outboundStream.DialErr:
 		return errors.NonFatalError(500, "dial failed", streamManagerCaller)
@@ -341,7 +340,7 @@ func (sm *babelStreamManager) SendMessage(toSend message.Message, destPeer peer.
 func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.Peer) {
 	sm.logger.Warnf("[ConnectionEvent] : Disconnecting from %s", p.String())
 	sm.dialingTransportsMutex.Lock()
-	k := getKeyForProtoPeerPair(disconnectingProto, p)
+	k := getKeyForConn(disconnectingProto, p)
 	if conn, ok := sm.outboundTransports.Load(k); ok {
 		sm.outboundTransports.Delete(k)
 		close(conn.(*outboundTransport).MsgChan)
@@ -368,13 +367,14 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 			sm.inboundTransports.Delete(newPeer.String())
 			return
 		}
-
 		if len(msgBuf) > 0 {
-			//sm.logger.Infof("Read %d bytes from %s", n, newPeer.ToString())
-			msgGeneric := deserializer.Deserialize(msgBuf)
-			msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
-			appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
-			sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
+			go func() {
+				//sm.logger.Infof("Read %d bytes from %s", n, newPeer.ToString())
+				msgGeneric := deserializer.Deserialize(msgBuf)
+				msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
+				appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
+				sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
+			}()
 		}
 	}
 }
@@ -419,8 +419,8 @@ func (sm *babelStreamManager) sendHandshakeMessage(transport messageIO.FrameConn
 	return nil
 }
 
-func getKeyForProtoPeerPair(protoId protocol.ID, peer peer.Peer) string {
-	return fmt.Sprintf("%d-%s", protoId, peer.String())
+func getKeyForConn(protoId protocol.ID, peer peer.Peer) string {
+	return peer.String()
 }
 
 func (sm *babelStreamManager) logStreamManagerState() {

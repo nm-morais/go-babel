@@ -202,7 +202,9 @@ func (p *protoManager) SendRequest(request request.Request, origin protocol.ID, 
 	go func() {
 		respChan := destProto.(protocolValueType).DeliverRequest(request)
 		reply := <-respChan
-		originProto.(protocolValueType).DeliverRequestReply(reply)
+		if reply != nil {
+			originProto.(protocolValueType).DeliverRequestReply(reply)
+		}
 	}()
 	return nil
 }
