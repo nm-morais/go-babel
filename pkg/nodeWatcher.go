@@ -325,11 +325,16 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 
 	udpTestDeadline := time.Now().Add(nm.conf.UdpTestTimeout)
 	rAddrUdp := &net.UDPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
+	nrErrors := 0
 	for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
 		//nm.logger.Infof("Writing test message to: %s", p.ToString())
 		_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(analytics.NewHBMessageForceReply(nm.selfPeer, true)), rAddrUdp)
 		if err != nil {
-			nm.logger.Panic(err)
+			if nrErrors == 3 {
+				nm.logger.Panic(err)
+			}
+			nrErrors++
+			nm.logger.Warnf("Error sending udp message: %s", err.Error())
 		}
 	}
 

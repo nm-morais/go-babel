@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -48,11 +47,9 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
-		for sig := range c {
-			fmt.Println("Sig:", sig)
-			pprof.StopCPUProfile()
-			os.Exit(0)
-		}
+		<-c
+		pprof.StopCPUProfile()
+		os.Exit(0)
 	}()
 
 	if randProtosPort {
@@ -74,9 +71,6 @@ func main() {
 	}
 
 	contactNode := peer.NewPeer(net.IPv4(127, 0, 0, 1), uint16(1200), uint16(1201))
-
-	fmt.Printf("Contact node IP %s", contactNode.IP())
-	fmt.Printf("Contact node %+v", contactNode)
 
 	p := pkg.NewProtoManager(protoManagerConf)
 	p.RegisterListenAddr(&net.TCPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})

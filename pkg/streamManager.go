@@ -60,6 +60,7 @@ type outboundTransport struct {
 	Finished chan interface{}
 
 	MsgChan chan []byte
+	sync.RWMutex
 }
 
 const (
@@ -231,6 +232,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		Dialed:   make(chan interface{}),
 		Finished: make(chan interface{}),
 		MsgChan:  make(chan []byte, 15),
+		RWMutex:  sync.RWMutex{},
 	}
 	sm.outboundTransports.Store(k, newOutboundTransport)
 	sm.dialingTransportsMutex.Unlock()
@@ -305,12 +307,17 @@ func (sm *babelStreamManager) handleOutboundTransportFailure(dialingProto protoc
 	sm.dialingTransportsMutex.Lock()
 	sm.outboundTransports.Delete(k)
 	sm.dialingTransportsMutex.Unlock()
+	if conn, ok := sm.outboundTransports.Load(k); ok {
+		sm.outboundTransports.Delete(k)
+		conn.(*outboundTransport).Lock()
+		close(conn.(*outboundTransport).MsgChan)
+		conn.(*outboundTransport).Unlock()
+	}
 	sm.babel.OutTransportFailure(dialingProto, remotePeer)
 	return nil
 }
 
 func (sm *babelStreamManager) SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID) errors.Error {
-	sm.dialingTransportsMutex.RLock()
 	k := getKeyForConn(origin, destPeer)
 	outboundStreamInt, ok := sm.outboundTransports.Load(k)
 	if !ok {
@@ -318,10 +325,8 @@ func (sm *babelStreamManager) SendMessage(toSend message.Message, destPeer peer.
 		return errors.NonFatalError(404, "stream not found", streamManagerCaller)
 	}
 	outboundStream := outboundStreamInt.(*outboundTransport)
-
-	//p.logger.Infof("Sending message of type %s", reflect.TypeOf(toSend))
-	// p.logger.Infof("Sending (bytes): %+v", toSendBytes)
-	sm.dialingTransportsMutex.RUnlock()
+	outboundStream.RLock()
+	defer outboundStream.RUnlock()
 	select {
 	case <-outboundStream.DialErr:
 		return errors.NonFatalError(500, "dial failed", streamManagerCaller)
@@ -330,7 +335,7 @@ func (sm *babelStreamManager) SendMessage(toSend message.Message, destPeer peer.
 	case <-outboundStream.Dialed:
 		select {
 		case <-outboundStream.Finished:
-			return errors.NonFatalError(500, "connection error", streamManagerCaller)
+			return errors.NonFatalError(500, "Stream finished early", streamManagerCaller)
 		case outboundStream.MsgChan <- appMsgSerializer.Serialize(internalMsg.NewAppMessageWrapper(toSend.Type(), origin, destination, sm.babel.SerializationManager().Serialize(toSend))):
 		}
 	}
@@ -343,7 +348,9 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 	k := getKeyForConn(disconnectingProto, p)
 	if conn, ok := sm.outboundTransports.Load(k); ok {
 		sm.outboundTransports.Delete(k)
+		conn.(*outboundTransport).Lock()
 		close(conn.(*outboundTransport).MsgChan)
+		conn.(*outboundTransport).Unlock()
 	}
 	sm.dialingTransportsMutex.Unlock()
 	sm.logStreamManagerState()
