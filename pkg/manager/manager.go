@@ -1,4 +1,4 @@
-package protocolManager
+package frontendManager
 
 import (
 	"net"

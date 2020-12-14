@@ -162,7 +162,14 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
 	var nrMessages int32 = 0
-	detector, err := analytics.New(nm.conf.PhiThreshold, uint(nm.conf.WindowSize), nm.conf.MinStdDeviation, nm.conf.AcceptableHbPause, nm.conf.FirstHeartbeatEstimate, nil)
+	detector, err := analytics.New(
+		nm.conf.PhiThreshold,
+		uint(nm.conf.WindowSize),
+		nm.conf.MinStdDeviation,
+		nm.conf.AcceptableHbPause,
+		nm.conf.FirstHeartbeatEstimate,
+		nil,
+	)
 	if err != nil {
 		nm.logger.Panic(err)
 	}
@@ -181,7 +188,11 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 	return nil
 }
 
-func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto protocol.ID, latency time.Duration) errors.Error {
+func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(
+	p peer.Peer,
+	issuerProto protocol.ID,
+	latency time.Duration,
+) errors.Error {
 	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.String(), latency)
 	if reflect.ValueOf(p).IsNil() {
 		nm.logger.Panic("Tried to watch nil peer")
@@ -190,14 +201,25 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
 	var nrMessages int32 = 0
-	detector, err := analytics.New(nm.conf.PhiThreshold, uint(nm.conf.WindowSize), nm.conf.MinStdDeviation, nm.conf.AcceptableHbPause, nm.conf.FirstHeartbeatEstimate, nil)
+	detector, err := analytics.New(
+		nm.conf.PhiThreshold,
+		uint(nm.conf.WindowSize),
+		nm.conf.MinStdDeviation,
+		nm.conf.AcceptableHbPause,
+		nm.conf.FirstHeartbeatEstimate,
+		nil,
+	)
 	if err != nil {
 		nm.logger.Panic(err)
 	}
 	newNodeInfo := &NodeInfoImpl{
 		nrMessagesReceived: &nrMessages,
 		peer:               p,
-		latencyCalc:        analytics.NewLatencyCalculatorWithValue(nm.conf.NewLatencyWeight, nm.conf.OldLatencyWeight, latency),
+		latencyCalc: analytics.NewLatencyCalculatorWithValue(
+			nm.conf.NewLatencyWeight,
+			nm.conf.OldLatencyWeight,
+			latency,
+		),
 		detector:           detector,
 		enoughSamples:      make(chan interface{}),
 		enoughTestMessages: make(chan interface{}),
@@ -298,7 +320,10 @@ func (nm *NodeWatcherImpl) GetNodeInfo(peer peer.Peer) (nodeWatcher.NodeInfo, er
 	}
 }
 
-func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (nodeWatcher.NodeInfo, errors.Error) {
+func (nm *NodeWatcherImpl) GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (
+	nodeWatcher.NodeInfo,
+	errors.Error,
+) {
 	nodeInfoInt, ok := nm.watching.Load(peer.String())
 	if !ok {
 		return nil, errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
@@ -328,7 +353,14 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 	nrErrors := 0
 	for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
 		//nm.logger.Infof("Writing test message to: %s", p.ToString())
-		_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(analytics.NewHBMessageForceReply(nm.selfPeer, true)), rAddrUdp)
+		_, err := nm.udpConn.WriteToUDP(
+			analytics.SerializeHeartbeatMessage(
+				analytics.NewHBMessageForceReply(
+					nm.selfPeer,
+					true,
+				),
+			), rAddrUdp,
+		)
 		if err != nil {
 			if nrErrors == 3 {
 				nm.logger.Panic(err)
@@ -395,7 +427,12 @@ func (nm *NodeWatcherImpl) startTCPServer() {
 }
 
 func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
-	defer c.Close()
+	defer func() {
+		err := c.Close()
+		if err != nil {
+			nm.logger.Errorf("error closing connection: %w", err)
+		}
+	}()
 
 	frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, c)
 
@@ -656,15 +693,23 @@ func (nm *NodeWatcherImpl) printLatencyToPeriodic() {
 	ticker := time.NewTicker(nm.conf.PrintLatencyToInterval)
 	for {
 		<-ticker.C
-		nm.watching.Range(func(k, v interface{}) bool {
-			watchedPeer := v.(nodeWatchingValue)
-			select {
-			case <-watchedPeer.enoughSamples:
-				nm.logger.Infof("Node %s:, PHI: %f, Latency: %d, Subscribers: %d", watchedPeer.Peer().String(), watchedPeer.Detector().Phi(), watchedPeer.LatencyCalc().CurrValue(), len(watchedPeer.subscribers))
-			default:
-			}
-			return true
-		})
+		nm.watching.Range(
+			func(k, v interface{}) bool {
+				watchedPeer := v.(nodeWatchingValue)
+				select {
+				case <-watchedPeer.enoughSamples:
+					nm.logger.Infof(
+						"Node %s:, PHI: %f, Latency: %d, Subscribers: %d",
+						watchedPeer.Peer().String(),
+						watchedPeer.Detector().Phi(),
+						watchedPeer.LatencyCalc().CurrValue(),
+						len(watchedPeer.subscribers),
+					)
+				default:
+				}
+				return true
+			},
+		)
 
 	}
 }

@@ -140,7 +140,7 @@ func (q *BlockingQueue) Size() uint64 {
 // Capacity returns this current elements remaining capacity, is concurrent safe
 func (q *BlockingQueue) Capacity() uint64 {
 	q.lock.Lock()
-	res := uint64(q.store.Size() - q.count)
+	res := q.store.Size() - q.count
 	q.lock.Unlock()
 
 	return res

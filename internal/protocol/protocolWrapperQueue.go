@@ -1,7 +1,8 @@
-package protocol
+package frontend
 
 import (
 	"fmt"
+	"strconv"
 
 	log "github.com/sirupsen/logrus"
 
@@ -120,10 +121,14 @@ func (pw WrapperProtocol) DeliverNotification(notification notification.Notifica
 }
 
 func (pw WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
-	_, err := pw.eventQueue.Put(NewEvent(messageEvent, messageWithPeer{
-		peer:    sender,
-		message: msg,
-	}))
+	_, err := pw.eventQueue.Put(
+		NewEvent(
+			messageEvent, messageWithPeer{
+				peer:    sender,
+				message: msg,
+			},
+		),
+	)
 	if err != nil {
 		pw.Logger().Panic(err)
 	}
@@ -149,21 +154,29 @@ func (pw WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Rep
 // network events
 
 func (pw WrapperProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
-	if _, err := pw.eventQueue.Put(NewEvent(messageDeliverySucessEvent, messageWithPeer{
-		peer:    peer,
-		message: message,
-	})); err != nil {
+	if _, err := pw.eventQueue.Put(
+		NewEvent(
+			messageDeliverySucessEvent, messageWithPeer{
+				peer:    peer,
+				message: message,
+			},
+		),
+	); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
 
 func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
 
-	if _, err := pw.eventQueue.Put(NewEvent(messageDeliveryFailureEvent, messageWithPeerAndErr{
-		peer:    peer,
-		message: message,
-		err:     error,
-	})); err != nil {
+	if _, err := pw.eventQueue.Put(
+		NewEvent(
+			messageDeliveryFailureEvent, messageWithPeerAndErr{
+				peer:    peer,
+				message: message,
+				err:     error,
+			},
+		),
+	); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
@@ -294,7 +307,13 @@ func (pw WrapperProtocol) handleReply(reply request.Reply) {
 func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
-		pw.Logger().Panic(fmt.Sprintf("message handler for message id %d not found in protocol %d", receivedMsg.Type(), pw.id))
+		pw.Logger().Panic(
+			fmt.Sprintf(
+				"message handler for message id %d not found in protocol %d",
+				receivedMsg.Type(),
+				pw.id,
+			),
+		)
 	}
 	handler(peer, receivedMsg)
 }
@@ -302,7 +321,12 @@ func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Mess
 func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
 	handler, ok := pw.requestHandlers[request.ID()]
 	if !ok {
-		pw.Logger().Panic(errors.FatalError(404, "request handler not found", string(pw.wrappedProtocol.ID())))
+		pw.Logger().Panic(
+			errors.FatalError(
+				404, "request handler not found",
+				strconv.Itoa(int(pw.wrappedProtocol.ID())),
+			),
+		)
 	}
 	return handler(request)
 }
@@ -318,16 +342,27 @@ func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
 func (pw WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
 	_, exists := pw.messageHandlers[messageID]
 	if exists {
-		return errors.FatalError(409, fmt.Sprintf("Message handler with MsgID: %d already exists", messageID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(
+			409,
+			fmt.Sprintf("Message handler with MsgID: %d already exists", messageID),
+			strconv.Itoa(int(pw.wrappedProtocol.ID())),
+		)
 	}
 	pw.messageHandlers[messageID] = handler
 	return nil
 }
 
-func (pw WrapperProtocol) RegisterNotificationHandler(notificationID notification.ID, handler handlers.NotificationHandler) errors.Error {
+func (pw WrapperProtocol) RegisterNotificationHandler(
+	notificationID notification.ID,
+	handler handlers.NotificationHandler,
+) errors.Error {
 	_, exists := pw.notificationHandlers[notificationID]
 	if exists {
-		return errors.FatalError(409, fmt.Sprintf("Notification handler with notificationID: %d already exists", notificationID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(
+			409,
+			fmt.Sprintf("Notification handler with notificationID: %d already exists", notificationID),
+			strconv.Itoa(int(pw.wrappedProtocol.ID())),
+		)
 	}
 	pw.notificationHandlers[notificationID] = handler
 	return nil
@@ -336,7 +371,11 @@ func (pw WrapperProtocol) RegisterNotificationHandler(notificationID notificatio
 func (pw WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
 	_, exists := pw.replyHandlers[replyID]
 	if exists {
-		return errors.FatalError(409, fmt.Sprintf("Request handler with replyID: %d already exists", replyID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(
+			409,
+			fmt.Sprintf("Request handler with replyID: %d already exists", replyID),
+			strconv.Itoa(int(pw.wrappedProtocol.ID())),
+		)
 	}
 	pw.replyHandlers[replyID] = handler
 	return nil
@@ -345,7 +384,11 @@ func (pw WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handle
 func (pw WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
 	_, exists := pw.requestHandlers[requestID]
 	if exists {
-		return errors.FatalError(409, fmt.Sprintf("Request handler with MsgID: %d already exists", requestID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(
+			409,
+			fmt.Sprintf("Request handler with MsgID: %d already exists", requestID),
+			strconv.Itoa(int(pw.wrappedProtocol.ID())),
+		)
 	}
 	pw.requestHandlers[requestID] = handler
 	return nil
@@ -354,7 +397,11 @@ func (pw WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler h
 func (pw WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
 	_, exists := pw.timerHandlers[timerID]
 	if exists {
-		return errors.FatalError(409, fmt.Sprintf("Request handler with timerID: %d already exists", timerID), string(pw.wrappedProtocol.ID()))
+		return errors.FatalError(
+			409,
+			fmt.Sprintf("Request handler with timerID: %d already exists", timerID),
+			strconv.Itoa(int(pw.wrappedProtocol.ID())),
+		)
 	}
 	pw.timerHandlers[timerID] = handler
 	return nil

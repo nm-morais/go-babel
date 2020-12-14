@@ -16,7 +16,12 @@ type AppMessageWrapper struct {
 	WrappedMsgBytes []byte
 }
 
-func NewAppMessageWrapper(mId message.ID, sourceProto protocol.ID, destProto protocol.ID, wrappedMsgBytes []byte) message.Message {
+func NewAppMessageWrapper(
+	mId message.ID,
+	sourceProto protocol.ID,
+	destProto protocol.ID,
+	wrappedMsgBytes []byte,
+) message.Message {
 	return &AppMessageWrapper{
 		MessageID:       mId,
 		SourceProto:     sourceProto,

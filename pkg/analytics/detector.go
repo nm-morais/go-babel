@@ -74,7 +74,8 @@ func New(
 	minStdDeviation time.Duration,
 	acceptableHeartbeatPause time.Duration,
 	firstHeartbeatEstimate time.Duration,
-	eventStream chan<- time.Duration) (*PhiAccuralFailureDetector, error) {
+	eventStream chan<- time.Duration,
+) (*PhiAccuralFailureDetector, error) {
 
 	if threshold <= 0.0 {
 		return nil, errors.New("threshold must be > 0")
@@ -131,7 +132,8 @@ func (d *PhiAccuralFailureDetector) casState(old, new *state) bool {
 	return atomic.CompareAndSwapPointer(
 		(*unsafe.Pointer)(unsafe.Pointer(&d.state)),
 		unsafe.Pointer(old),
-		unsafe.Pointer(new))
+		unsafe.Pointer(new),
+	)
 }
 
 // IsAvailable returns true if the resource is considered to be up and healthy; false otherwise.

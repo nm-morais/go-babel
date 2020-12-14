@@ -182,7 +182,10 @@ func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.M
 	}
 
 	if fwdJoinMsg.TTL == PRWL {
-		if !h.isPeerInView(fwdJoinMsg.OriginalSender, h.passiveView) && !h.isPeerInView(fwdJoinMsg.OriginalSender, h.activeView) {
+		if !h.isPeerInView(fwdJoinMsg.OriginalSender, h.passiveView) && !h.isPeerInView(
+			fwdJoinMsg.OriginalSender,
+			h.activeView,
+		) {
 			if h.isPassiveViewFull() {
 				h.dropRandomElemFromPassiveView()
 			}
@@ -202,7 +205,12 @@ func (h *Hyparview) HandleForwardJoinMessage(sender peer.Peer, message message.M
 		OriginalSender: fwdJoinMsg.OriginalSender,
 	}
 
-	h.logger.Infof("Forwarding forwardJoin (original=%s) with TTL=%d message to : %s", fwdJoinMsg.OriginalSender.String(), toSend.TTL, rndNodes[0].String())
+	h.logger.Infof(
+		"Forwarding forwardJoin (original=%s) with TTL=%d message to : %s",
+		fwdJoinMsg.OriginalSender.String(),
+		toSend.TTL,
+		rndNodes[0].String(),
+	)
 	h.sendMessage(toSend, rndNodes[0])
 }
 

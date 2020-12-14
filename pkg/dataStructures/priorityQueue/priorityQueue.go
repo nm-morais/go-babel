@@ -62,6 +62,12 @@ func (pq *PriorityQueue) Update(item *Item, value interface{}, priority int64) {
 
 func (pq *PriorityQueue) LogEntries(logger *logrus.Logger) {
 	for _, item := range *pq {
-		logger.Infof("Item %d, key: %d: , prio: %d , time until: %s", item.Index, item.Key, item.Priority, time.Until(time.Unix(0, item.Priority)))
+		logger.Infof(
+			"Item %d, key: %d: , prio: %d , time until: %s",
+			item.Index,
+			item.Key,
+			item.Priority,
+			time.Until(time.Unix(0, item.Priority)),
+		)
 	}
 }

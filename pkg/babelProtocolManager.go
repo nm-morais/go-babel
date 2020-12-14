@@ -95,7 +95,11 @@ func (p *protoManager) RegisterProtocol(protocol protocol.Protocol) errors.Error
 	return nil
 }
 
-func (p *protoManager) RegisterNotificationHandler(protoID protocol.ID, notification notification.Notification, handler handlers.NotificationHandler) errors.Error {
+func (p *protoManager) RegisterNotificationHandler(
+	protoID protocol.ID,
+	notification notification.Notification,
+	handler handlers.NotificationHandler,
+) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", protoID)
@@ -105,7 +109,11 @@ func (p *protoManager) RegisterNotificationHandler(protoID protocol.ID, notifica
 	return nil
 }
 
-func (p *protoManager) RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.TimerHandler) errors.Error {
+func (p *protoManager) RegisterTimerHandler(
+	protoID protocol.ID,
+	timer timer.ID,
+	handler handlers.TimerHandler,
+) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", protoID)
@@ -114,7 +122,11 @@ func (p *protoManager) RegisterTimerHandler(protoID protocol.ID, timer timer.ID,
 	return nil
 }
 
-func (p *protoManager) RegisterRequestHandler(protoID protocol.ID, request request.ID, handler handlers.RequestHandler) errors.Error {
+func (p *protoManager) RegisterRequestHandler(
+	protoID protocol.ID,
+	request request.ID,
+	handler handlers.RequestHandler,
+) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", protoID)
@@ -123,7 +135,11 @@ func (p *protoManager) RegisterRequestHandler(protoID protocol.ID, request reque
 	return nil
 }
 
-func (p *protoManager) RegisterRequestReplyHandler(protoID protocol.ID, request request.ID, handler handlers.ReplyHandler) errors.Error {
+func (p *protoManager) RegisterRequestReplyHandler(
+	protoID protocol.ID,
+	request request.ID,
+	handler handlers.ReplyHandler,
+) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", protoID)
@@ -132,7 +148,11 @@ func (p *protoManager) RegisterRequestReplyHandler(protoID protocol.ID, request 
 	return nil
 }
 
-func (p *protoManager) RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) errors.Error {
+func (p *protoManager) RegisterMessageHandler(
+	protoID protocol.ID,
+	message message.Message,
+	handler handlers.MessageHandler,
+) errors.Error {
 	proto, ok := p.protocols.Load(protoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", protoID)
@@ -146,11 +166,20 @@ func (p *protoManager) RegisterMessageHandler(protoID protocol.ID, message messa
 	return nil
 }
 
-func (p *protoManager) SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID) {
+func (p *protoManager) SendMessage(
+	toSend message.Message,
+	destPeer peer.Peer,
+	origin protocol.ID,
+	destination protocol.ID,
+) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {
-			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller))
+			proto.(protocolValueType).MessageDeliveryErr(
+				toSend,
+				destPeer,
+				errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller),
+			)
 		}
 	}()
 
@@ -167,11 +196,20 @@ func (p *protoManager) SendMessage(toSend message.Message, destPeer peer.Peer, o
 	}()
 }
 
-func (p *protoManager) SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID) {
+func (p *protoManager) SendMessageAndDisconnect(
+	toSend message.Message,
+	destPeer peer.Peer,
+	origin protocol.ID,
+	destination protocol.ID,
+) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {
-			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller))
+			proto.(protocolValueType).MessageDeliveryErr(
+				toSend,
+				destPeer,
+				errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller),
+			)
 		}
 	}()
 
@@ -218,7 +256,13 @@ func (p *protoManager) RegisteredProtos() []protocol.ID {
 	return p.protoIds
 }
 
-func (p *protoManager) SendMessageSideStream(toSend message.Message, peer peer.Peer, addr net.Addr, sourceProtoID protocol.ID, destProto protocol.ID) {
+func (p *protoManager) SendMessageSideStream(
+	toSend message.Message,
+	peer peer.Peer,
+	addr net.Addr,
+	sourceProtoID protocol.ID,
+	destProto protocol.ID,
+) {
 	callerProto, ok := p.protocols.Load(sourceProtoID)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", sourceProtoID)
@@ -305,17 +349,19 @@ func (p *protoManager) setupLoggers() {
 		all = io.MultiWriter(os.Stdout, all)
 	}
 
-	p.protocols.Range(func(key, proto interface{}) bool {
-		protoName := proto.(protocolValueType).Name()
-		protoFile, err := os.Create(p.config.LogFolder + fmt.Sprintf("/%s.log", protoName))
-		if err != nil {
-			log.Panic(err)
-		}
-		logger := proto.(protocolValueType).Logger()
-		mw := io.MultiWriter(all, protoFile)
-		logger.SetOutput(mw)
-		return true
-	})
+	p.protocols.Range(
+		func(key, proto interface{}) bool {
+			protoName := proto.(protocolValueType).Name()
+			protoFile, err := os.Create(p.config.LogFolder + fmt.Sprintf("/%s.log", protoName))
+			if err != nil {
+				log.Panic(err)
+			}
+			logger := proto.(protocolValueType).Logger()
+			mw := io.MultiWriter(all, protoFile)
+			logger.SetOutput(mw)
+			return true
+		},
+	)
 
 	protoManagerFile, err := os.Create(p.config.LogFolder + "/protoManager.log")
 	if err != nil {
@@ -367,15 +413,19 @@ func (p *protoManager) StartBackground() {
 		<-done
 	}
 
-	p.protocols.Range(func(_, proto interface{}) bool {
-		proto.(protocolValueType).Init()
-		return true
-	})
+	p.protocols.Range(
+		func(_, proto interface{}) bool {
+			proto.(protocolValueType).Init()
+			return true
+		},
+	)
 
-	p.protocols.Range(func(_, proto interface{}) bool {
-		go proto.(protocolValueType).Start()
-		return true
-	})
+	p.protocols.Range(
+		func(_, proto interface{}) bool {
+			go proto.(protocolValueType).Start()
+			return true
+		},
+	)
 }
 
 func (p *protoManager) Start() {
@@ -386,14 +436,18 @@ func (p *protoManager) Start() {
 		<-done
 	}
 
-	p.protocols.Range(func(_, proto interface{}) bool {
-		proto.(protocolValueType).Init()
-		return true
-	})
+	p.protocols.Range(
+		func(_, proto interface{}) bool {
+			proto.(protocolValueType).Init()
+			return true
+		},
+	)
 
-	p.protocols.Range(func(_, proto interface{}) bool {
-		go proto.(protocolValueType).Start()
-		return true
-	})
+	p.protocols.Range(
+		func(_, proto interface{}) bool {
+			go proto.(protocolValueType).Start()
+			return true
+		},
+	)
 	select {}
 }

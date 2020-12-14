@@ -29,8 +29,6 @@ var (
 	ErrUnsupportedlength = errors.New("unsupported lengthFieldLength. (expected: 1, 2, 3, 4, or 8)")
 	// ErrTooLessLength adjusted frame length is less than zero
 	ErrTooLessLength = errors.New("adjusted frame length is less than zero")
-	// ErrUnexpectedFixedLength is not unexpected fixed length for writting fixed length frames.
-	ErrUnexpectedFixedLength = errors.New("unexpected fixed length")
 )
 
 type lengthFieldBasedFrameConn struct {
@@ -142,7 +140,7 @@ func (fc *lengthFieldBasedFrameConn) getUnadjustedFrameLength() (lenBuf []byte, 
 		if err != nil {
 			return nil, 0, err
 		}
-		return lenBuf, uint64(fc.decoderConfig.ByteOrder.Uint64(lenBuf)), nil
+		return lenBuf, fc.decoderConfig.ByteOrder.Uint64(lenBuf), nil
 	default:
 		return nil, 0, ErrUnsupportedlength
 	}
@@ -215,7 +213,7 @@ func (fc *lengthFieldBasedFrameConn) WriteFrame(p []byte) error {
 	}
 
 	_, err = fc.w.Write(p)
-	fc.w.Flush()
+	_ = fc.w.Flush()
 	return err
 }
 

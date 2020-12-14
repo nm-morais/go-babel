@@ -21,14 +21,16 @@ func (f *formatter) Format(e *log.Entry) ([]byte, error) {
 
 func NewLogger(owner string) *log.Logger {
 	logger := log.New()
-	logger.SetFormatter(&formatter{
-		owner: owner,
-		lf: &log.TextFormatter{
-			DisableColors:   true,
-			ForceColors:     false,
-			FullTimestamp:   true,
-			TimestampFormat: time.StampMilli,
+	logger.SetFormatter(
+		&formatter{
+			owner: owner,
+			lf: &log.TextFormatter{
+				DisableColors:   true,
+				ForceColors:     false,
+				FullTimestamp:   true,
+				TimestampFormat: time.StampMilli,
+			},
 		},
-	})
+	)
 	return logger
 }

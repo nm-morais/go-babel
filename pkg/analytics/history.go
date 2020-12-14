@@ -18,7 +18,8 @@ func newHeartbeatHistory(maxSampleSize uint) heartbeatHistory {
 		maxSampleSize:      maxSampleSize,
 		intervals:          make([]uint64, 0, maxSampleSize),
 		intervalSum:        0,
-		squaredIntervalSum: 0}
+		squaredIntervalSum: 0,
+	}
 }
 
 // mean of this heartbeat history's intervals
@@ -58,5 +59,6 @@ func (h heartbeatHistory) append(interval uint64) heartbeatHistory {
 		maxSampleSize:      h.maxSampleSize,
 		intervals:          dst,
 		intervalSum:        h.intervalSum - droppedInterval + interval,
-		squaredIntervalSum: h.squaredIntervalSum - (droppedInterval * droppedInterval) + (interval * interval)}
+		squaredIntervalSum: h.squaredIntervalSum - (droppedInterval * droppedInterval) + (interval * interval),
+	}
 }

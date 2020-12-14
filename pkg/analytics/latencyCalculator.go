@@ -21,7 +21,11 @@ func NewLatencyCalculator(newMeasurementsWeight float32, oldMeasurementsWeight f
 	}
 }
 
-func NewLatencyCalculatorWithValue(newMeasurementsWeight float32, oldMeasurementsWeight float32, value time.Duration) *LatencyCalculator {
+func NewLatencyCalculatorWithValue(
+	newMeasurementsWeight float32,
+	oldMeasurementsWeight float32,
+	value time.Duration,
+) *LatencyCalculator {
 	return &LatencyCalculator{
 		mu:                    sync.Mutex{},
 		currValue:             value,
