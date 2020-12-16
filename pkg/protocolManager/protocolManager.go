@@ -59,5 +59,6 @@ type ProtocolManager interface {
 
 	SelfPeer() peer.Peer
 
-	Start()
+	StartAsync()
+	StartSync()
 }

@@ -405,7 +405,7 @@ func (p *protoManager) RegisterTimer(origin protocol.ID, timer timer.Timer) int 
 	return p.tq.AddTimer(timer, origin)
 }
 
-func (p *protoManager) StartBackground() {
+func (p *protoManager) StartAsync() {
 	p.setupLoggers()
 	for _, l := range p.listenAddrs {
 		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
@@ -428,7 +428,7 @@ func (p *protoManager) StartBackground() {
 	)
 }
 
-func (p *protoManager) Start() {
+func (p *protoManager) StartSync() {
 	p.setupLoggers()
 	for _, l := range p.listenAddrs {
 		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
