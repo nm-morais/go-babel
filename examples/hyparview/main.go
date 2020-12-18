@@ -61,7 +61,6 @@ func main() {
 	}
 
 	protoManagerConf := pkg.Config{
-
 		SmConf: pkg.StreamManagerConf{
 			DialTimeout: 3 * time.Second,
 		},

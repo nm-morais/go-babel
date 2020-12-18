@@ -46,6 +46,7 @@ func NewHyparviewProtocol(contactNode peer.Peer, babel protocolManager.ProtocolM
 		passiveView:  make([]peer.Peer, 0, passiveViewSize),
 		pendingDials: make(map[string]bool),
 		logger:       logs.NewLogger(name),
+		babel:        babel,
 	}
 }
 
