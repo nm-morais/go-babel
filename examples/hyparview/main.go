@@ -76,5 +76,5 @@ func main() {
 	p.RegisterListenAddr(&net.TCPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
 	p.RegisterListenAddr(&net.UDPAddr{IP: protoManagerConf.Peer.IP(), Port: int(protoManagerConf.Peer.ProtosPort())})
 	p.RegisterProtocol(NewHyparviewProtocol(contactNode, p))
-	p.Start()
+	p.StartSync()
 }

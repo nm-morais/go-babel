@@ -49,5 +49,5 @@ func main() {
 	contactNode := peer.NewPeer(net.IPv4(0, 0, 0, 0), uint16(1200), uint16(1200))
 	p.RegisterListenAddr(&net.TCPAddr{IP: config.Peer.IP(), Port: int(config.Peer.ProtosPort())})
 	p.RegisterProtocol(NewPingPongProtocol(contactNode, p))
-	p.Start()
+	p.StartSync()
 }
