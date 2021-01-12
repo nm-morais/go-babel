@@ -38,7 +38,8 @@ var (
 )
 
 type StreamManagerConf struct {
-	DialTimeout time.Duration
+	BatchTimeout time.Duration
+	DialTimeout  time.Duration
 }
 
 type babelStreamManager struct {
@@ -323,6 +324,7 @@ func (sm *babelStreamManager) SendMessage(
 	destPeer peer.Peer,
 	origin protocol.ID,
 	destination protocol.ID,
+	batch bool,
 ) errors.Error {
 	k := getKeyForConn(origin, destPeer)
 	outboundStreamInt, ok := sm.outboundTransports.Load(k)
@@ -348,8 +350,7 @@ func (sm *babelStreamManager) SendMessage(
 				origin,
 				destination,
 				sm.babel.SerializationManager().Serialize(toSend),
-			),
-		):
+			)):
 			return nil
 		}
 	}

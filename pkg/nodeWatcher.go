@@ -96,6 +96,12 @@ type NodeWatcherConf struct {
 	MinStdDeviation        time.Duration
 	AcceptableHbPause      time.Duration
 	FirstHeartbeatEstimate time.Duration
+
+	AdvertiseListenAddr net.IP
+	AdvertiseListenPort int
+
+	ListenAddr net.IP
+	ListenPort int
 }
 
 // threshold float64,
@@ -111,7 +117,7 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 	nm := &NodeWatcherImpl{
 		babel:               babel,
 		conf:                config,
-		selfPeer:            babel.SelfPeer(),
+		selfPeer:            peer.NewPeer(config.AdvertiseListenAddr, uint16(0), uint16(config.AdvertiseListenPort)),
 		watching:            sync.Map{},
 		conditions:          make(priorityqueue.PriorityQueue, 0),
 		logger:              logs.NewLogger(nodeWatcherCaller),
@@ -125,8 +131,8 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 	}
 
 	listenAddr := &net.UDPAddr{
-		IP:   nm.selfPeer.IP(),
-		Port: int(nm.selfPeer.AnalyticsPort()),
+		IP:   nm.conf.ListenAddr,
+		Port: nm.conf.ListenPort,
 	}
 
 	udpConn, err := net.ListenUDP("udp", listenAddr)
@@ -140,16 +146,20 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 }
 
 func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, nodeInfo *NodeInfoImpl) {
+
 	stream, err := nm.establishStreamTo(nodeInfo.Peer(), nodeInfo)
 	if err != nil {
 		close(nodeInfo.err)
 		return
 	}
+
 	nodeInfo.peerConn = stream
+
 	switch stream := stream.(type) {
 	case *net.TCPConn:
 		go nm.handleTCPConnection(stream)
 	}
+
 	nm.startHbRoutine(nodeInfo)
 }
 
@@ -157,10 +167,13 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 	if reflect.ValueOf(p).IsNil() {
 		nm.logger.Panic("Tried to watch nil peer")
 	}
+
 	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.String())
+
 	if _, ok := nm.watching.Load(p.String()); ok {
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
+
 	var nrMessages int32 = 0
 	detector, err := analytics.New(
 		nm.conf.PhiThreshold,
@@ -194,12 +207,15 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(
 	latency time.Duration,
 ) errors.Error {
 	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.String(), latency)
+
 	if reflect.ValueOf(p).IsNil() {
 		nm.logger.Panic("Tried to watch nil peer")
 	}
+
 	if _, ok := nm.watching.Load(p.String()); ok {
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
 	}
+
 	var nrMessages int32 = 0
 	detector, err := analytics.New(
 		nm.conf.PhiThreshold,
@@ -209,9 +225,11 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(
 		nm.conf.FirstHeartbeatEstimate,
 		nil,
 	)
+
 	if err != nil {
 		nm.logger.Panic(err)
 	}
+
 	newNodeInfo := &NodeInfoImpl{
 		nrMessagesReceived: &nrMessages,
 		peer:               p,
@@ -352,6 +370,7 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 	rAddrUdp := &net.UDPAddr{IP: p.IP(), Port: int(p.AnalyticsPort())}
 	nrErrors := 0
 	for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
+
 		//nm.logger.Infof("Writing test message to: %s", p.ToString())
 		_, err := nm.udpConn.WriteToUDP(
 			analytics.SerializeHeartbeatMessage(
@@ -408,8 +427,8 @@ func (nm *NodeWatcherImpl) startUDPServer() {
 
 func (nm *NodeWatcherImpl) startTCPServer() {
 	listenAddr := &net.TCPAddr{
-		IP:   nm.selfPeer.IP(),
-		Port: int(nm.selfPeer.AnalyticsPort()),
+		IP:   nm.conf.ListenAddr,
+		Port: nm.conf.ListenPort,
 	}
 
 	listener, err := net.ListenTCP("tcp", listenAddr)

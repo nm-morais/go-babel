@@ -142,7 +142,7 @@ func (m *PingPongProtocol) handlePingMessage(sender peer.Peer, msg message.Messa
 	m.logger.Infof("Got ping message, content : %s", pingMsg.Payload)
 	response := Pong{Payload: pingMsg.Payload + "Pong"}
 	m.logger.Infof("Sending Pong message, content : %s", response.Payload)
-	m.babel.SendMessage(response, sender, protoID, protoID)
+	m.babel.SendMessage(response, sender, protoID, protoID, false)
 }
 
 func (m *PingPongProtocol) handlePongMessage(sender peer.Peer, msg message.Message) {
@@ -160,9 +160,8 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 
 	for _, remotePeer := range m.activePeers {
 		m.logger.Infof("Sending pingMessage to %s", remotePeer.String())
-		//m.babel.Write(pingMsg, remotePeer, protoID, []protocol.ID{protoID})
 		for i := 0; i < 1; i++ {
-			m.babel.SendMessage(pingMsg, remotePeer, protoID, protoID)
+			m.babel.SendMessage(pingMsg, remotePeer, protoID, protoID, false)
 		}
 	}
 

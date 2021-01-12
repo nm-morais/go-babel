@@ -31,6 +31,7 @@ import (
 const ProtoManagerCaller = "ProtoManager"
 
 type Config struct {
+	// Silent represents wether the logger outputs to stdout
 	Silent           bool
 	Cpuprofile       bool
 	Memprofile       bool
@@ -166,41 +167,12 @@ func (p *protoManager) RegisterMessageHandler(
 	return nil
 }
 
-func (p *protoManager) SendMessage(
-	toSend message.Message,
-	destPeer peer.Peer,
-	origin protocol.ID,
-	destination protocol.ID,
-) {
-	proto, ok := p.protocols.Load(origin)
-	defer func() {
-		if r := recover(); r != nil {
-			proto.(protocolValueType).MessageDeliveryErr(
-				toSend,
-				destPeer,
-				errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller),
-			)
-		}
-	}()
-
-	if !ok {
-		p.logger.Panicf("Protocol %d not registered", origin)
-	}
-	go func() {
-		err := p.streamManager.SendMessage(toSend, destPeer, origin, destination)
-		if err != nil {
-			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
-			return
-		}
-		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
-	}()
-}
-
 func (p *protoManager) SendMessageAndDisconnect(
 	toSend message.Message,
 	destPeer peer.Peer,
 	origin protocol.ID,
 	destination protocol.ID,
+	batch bool,
 ) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
@@ -218,13 +190,44 @@ func (p *protoManager) SendMessageAndDisconnect(
 	}
 	go func() {
 		defer p.Disconnect(origin, destPeer)
-		err := p.streamManager.SendMessage(toSend, destPeer, origin, destination)
+		err := p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
 		if err != nil {
 			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
 			return
 		}
 		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
 	}()
+}
+
+func (p *protoManager) SendMessage(
+	toSend message.Message,
+	destPeer peer.Peer,
+	origin protocol.ID,
+	destination protocol.ID,
+	batch bool,
+) {
+
+	proto, ok := p.protocols.Load(origin)
+	defer func() {
+		if r := recover(); r != nil {
+			proto.(protocolValueType).MessageDeliveryErr(
+				toSend,
+				destPeer,
+				errors.NonFatalError(500, "an error ocurred sending message", ProtoManagerCaller),
+			)
+		}
+	}()
+
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", origin)
+	}
+
+	err := p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
+	if err != nil {
+		proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
+		return
+	}
+	proto.(protocolValueType).MessageDelivered(toSend, destPeer)
 }
 
 func (p *protoManager) SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
@@ -429,7 +432,9 @@ func (p *protoManager) StartAsync() {
 }
 
 func (p *protoManager) StartSync() {
+
 	p.setupLoggers()
+
 	for _, l := range p.listenAddrs {
 		p.logger.Infof("Starting listener: %s", reflect.TypeOf(l))
 		done := p.streamManager.AcceptConnectionsAndNotify(l)

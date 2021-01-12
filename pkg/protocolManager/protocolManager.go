@@ -15,8 +15,7 @@ import (
 )
 
 type ProtocolManager interface {
-	SendMessage(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID)
-	SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID)
+	SendMessage(toSend message.Message, destPeer peer.Peer, origin, destination protocol.ID, batch bool)
 	SendMessageSideStream(
 		toSend message.Message,
 		peer peer.Peer,
@@ -38,6 +37,7 @@ type ProtocolManager interface {
 
 	DeliverMessage(sender peer.Peer, message message.Message, destProto protocol.ID)
 	DeliverTimer(timer timer.Timer, destProto protocol.ID)
+	SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID, batch bool)
 
 	RegisterProtocol(protocol protocol.Protocol) errors.Error
 	RegisteredProtos() []protocol.ID
@@ -51,7 +51,7 @@ type ProtocolManager interface {
 	) errors.Error
 	RegisterTimerHandler(protoID protocol.ID, timer timer.ID, handler handlers.TimerHandler) errors.Error
 	RegisterRequestHandler(protoID protocol.ID, request request.ID, handler handlers.RequestHandler) errors.Error
-	RegisterRequestReplyHandler(protoID protocol.ID, replyId request.ID, handler handlers.ReplyHandler) errors.Error
+	RegisterRequestReplyHandler(protoID protocol.ID, replyID request.ID, handler handlers.ReplyHandler) errors.Error
 	RegisterMessageHandler(protoID protocol.ID, message message.Message, handler handlers.MessageHandler) errors.Error
 
 	CancelTimer(timerID int) errors.Error

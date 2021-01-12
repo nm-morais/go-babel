@@ -554,7 +554,7 @@ func (h *Hyparview) dropRandomElemFromPassiveView() {
 }
 
 func (h *Hyparview) sendMessage(msg message.Message, target peer.Peer) {
-	h.babel.SendMessage(msg, target, h.ID(), h.ID())
+	h.babel.SendMessage(msg, target, h.ID(), h.ID(), false)
 }
 
 func (h *Hyparview) sendMessageTmpTransport(msg message.Message, target peer.Peer) {
