@@ -117,8 +117,8 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 	nm := &NodeWatcherImpl{
 		babel:               babel,
 		conf:                config,
-		selfPeer:            peer.NewPeer(config.AdvertiseListenAddr, uint16(0), uint16(config.AdvertiseListenPort)),
 		watching:            sync.Map{},
+		selfPeer:            peer.NewPeer(config.AdvertiseListenAddr, uint16(0), uint16(config.AdvertiseListenPort)),
 		conditions:          make(priorityqueue.PriorityQueue, 0),
 		logger:              logs.NewLogger(nodeWatcherCaller),
 		addCondChan:         make(chan *priorityqueue.Item),
@@ -128,6 +128,10 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 
 	if nm.conf.OldLatencyWeight+nm.conf.NewLatencyWeight != 1 {
 		nm.logger.Panic("OldLatencyWeight + NewLatencyWeight != 1")
+	}
+
+	if config.AdvertiseListenAddr == nil {
+		nm.selfPeer = peer.NewPeer(config.ListenAddr, uint16(0), uint16(config.AdvertiseListenPort))
 	}
 
 	listenAddr := &net.UDPAddr{
