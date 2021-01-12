@@ -172,7 +172,6 @@ func (p *protoManager) SendMessageAndDisconnect(
 	destPeer peer.Peer,
 	origin protocol.ID,
 	destination protocol.ID,
-	batch bool,
 ) {
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
@@ -188,14 +187,10 @@ func (p *protoManager) SendMessageAndDisconnect(
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
 	}
+
 	go func() {
-		defer p.Disconnect(origin, destPeer)
-		err := p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
-		if err != nil {
-			proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
-			return
-		}
-		proto.(protocolValueType).MessageDelivered(toSend, destPeer)
+		p.streamManager.SendMessage(toSend, destPeer, origin, destination, false)
+		p.Disconnect(origin, destPeer)
 	}()
 }
 
@@ -221,13 +216,7 @@ func (p *protoManager) SendMessage(
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
 	}
-
-	err := p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
-	if err != nil {
-		proto.(protocolValueType).MessageDeliveryErr(toSend, destPeer, err)
-		return
-	}
-	proto.(protocolValueType).MessageDelivered(toSend, destPeer)
+	go p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
 }
 
 func (p *protoManager) SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
@@ -266,24 +255,28 @@ func (p *protoManager) SendMessageSideStream(
 	sourceProtoID protocol.ID,
 	destProto protocol.ID,
 ) {
-	callerProto, ok := p.protocols.Load(sourceProtoID)
-	if !ok {
-		p.logger.Panicf("Protocol %d not registered", sourceProtoID)
-	}
-	go func() {
-		err := p.streamManager.SendMessageSideStream(toSend, peer, addr, sourceProtoID, destProto)
-		if err != nil {
-			callerProto.(protocolValueType).MessageDeliveryErr(toSend, peer, err)
-			return
-		}
-		callerProto.(protocolValueType).MessageDelivered(toSend, peer)
-	}()
-
+	go p.streamManager.SendMessageSideStream(toSend, peer, addr, sourceProtoID, destProto)
 }
 
 func (p *protoManager) Dial(dialingProto protocol.ID, peer peer.Peer, toDial net.Addr) errors.Error {
 	p.logger.Infof("Dialing new node %s", toDial.String())
 	return p.streamManager.DialAndNotify(dialingProto, peer, toDial)
+}
+
+func (p *protoManager) MessageDelivered(sendingProto protocol.ID, msg message.Message, peer peer.Peer) {
+	callerProto, ok := p.protocols.Load(sendingProto)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", sendingProto)
+	}
+	callerProto.(protocolValueType).MessageDelivered(msg, peer)
+}
+
+func (p *protoManager) MessageDeliveryErr(sendingProto protocol.ID, msg message.Message, peer peer.Peer, err errors.Error) {
+	callerProto, ok := p.protocols.Load(sendingProto)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", sendingProto)
+	}
+	callerProto.(protocolValueType).MessageDeliveryErr(msg, peer, err)
 }
 
 func (p *protoManager) Disconnect(source protocol.ID, toDc peer.Peer) {

@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -38,8 +39,9 @@ var (
 )
 
 type StreamManagerConf struct {
-	BatchTimeout time.Duration
-	DialTimeout  time.Duration
+	BatchMaxSizeBytes int
+	BatchTimeout      time.Duration
+	DialTimeout       time.Duration
 }
 
 type babelStreamManager struct {
@@ -55,12 +57,15 @@ type babelStreamManager struct {
 type outboundTransport struct {
 	Addr net.Addr
 
-	Dialed   chan interface{}
-	DialErr  chan interface{}
-	Finished chan interface{}
+	Dialed  chan interface{}
+	DialErr chan interface{}
 
-	MsgChan chan []byte
-	sync.RWMutex
+	conn   messageIO.FrameConn
+	connMU sync.Mutex
+
+	batchMessages []message.Message
+	batchBytes    *bytes.Buffer
+	batchMU       sync.Mutex
 }
 
 const (
@@ -101,16 +106,20 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		peerBytes := sm.babel.SelfPeer().Marshal()
 		_, wErr := sm.udpConn.WriteToUDP(append(peerBytes, wrappedBytes...), rAddr)
 		if wErr != nil {
+			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, wErr.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
+		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
 	case *net.TCPAddr:
 		tcpStream, err := net.Dial(rAddr.Network(), rAddr.String())
 		if err != nil {
+			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, err.Error(), streamManagerCaller)
 		}
 		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, tcpStream)
 		hErr := sm.sendHandshakeMessage(frameBasedConn, sourceProtoID, TemporaryTunnel)
 		if hErr != nil {
+			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, hErr)
 			return hErr
 		}
 		msgBytes := toSend.Serializer().Serialize(toSend)
@@ -118,8 +127,10 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
 		wErr := frameBasedConn.WriteFrame(wrappedBytes)
 		if wErr != nil {
+			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, wErr.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
+		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
 		err = tcpStream.Close()
 		if err != nil {
 			sm.logger.Errorf("Err: %+w", err)
@@ -233,12 +244,14 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, addr net.Addr) errors.Error {
 	k := getKeyForConn(dialingProto, toDial)
 	newOutboundTransportAux := &outboundTransport{
-		Addr:     addr,
-		DialErr:  make(chan interface{}),
-		Dialed:   make(chan interface{}),
-		Finished: make(chan interface{}),
-		MsgChan:  make(chan []byte, 15),
-		RWMutex:  sync.RWMutex{},
+		Addr:          addr,
+		Dialed:        make(chan interface{}),
+		DialErr:       make(chan interface{}),
+		conn:          nil,
+		connMU:        sync.Mutex{},
+		batchMessages: make([]message.Message, 0),
+		batchBytes:    bytes.NewBuffer(make([]byte, 0, sm.conf.BatchMaxSizeBytes)),
+		batchMU:       sync.Mutex{},
 	}
 	newOutboundTransportGeneric, loaded := sm.outboundTransports.LoadOrStore(k, newOutboundTransportAux)
 	newOutboundTransport := newOutboundTransportGeneric.(*outboundTransport)
@@ -288,11 +301,10 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 				sm.outboundTransports.Delete(k)
 				return
 			}
-
+			newOutboundTransport.conn = frameBasedConn
 			close(newOutboundTransport.Dialed)
 			sm.logger.Warnf("Dialed %s successfully", k)
 			sm.logStreamManagerState()
-			sm.handleOutTransportFrameConn(dialingProto, newOutboundTransport, frameBasedConn, toDial)
 		default:
 			sm.logger.Panic("Unsupported conn type")
 		}
@@ -300,24 +312,23 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 	return nil
 }
 
-func (sm *babelStreamManager) handleOutTransportFrameConn(
-	dialingProto protocol.ID,
-	t *outboundTransport,
-	conn messageIO.FrameConn,
-	peer peer.Peer,
-) {
-	k := getKeyForConn(dialingProto, peer)
-	defer close(t.Finished)
-	defer sm.outboundTransports.Delete(k)
-	for msg := range t.MsgChan {
-		err := conn.WriteFrame(msg)
-		if err != nil {
-			sm.closeConn(conn)
-			sm.babel.OutTransportFailure(dialingProto, peer)
-			break
-		}
-	}
-}
+// func (sm *babelStreamManager) handleOutTransportFrameConn(
+// 	dialingProto protocol.ID,
+// 	t *outboundTransport,
+// 	peer peer.Peer,
+// ) {
+// 	k := getKeyForConn(dialingProto, peer)
+// 	defer close(t.Finished)
+// 	defer sm.outboundTransports.Delete(k)
+// 	for msg := range t.MsgChan {
+// 		err := t.conn.WriteFrame(msg)
+// 		if err != nil {
+// 			sm.closeConn(conn)
+// 			sm.babel.OutTransportFailure(dialingProto, peer)
+// 			break
+// 		}
+// 	}
+// }
 
 func (sm *babelStreamManager) SendMessage(
 	toSend message.Message,
@@ -329,40 +340,47 @@ func (sm *babelStreamManager) SendMessage(
 	k := getKeyForConn(origin, destPeer)
 	outboundStreamInt, ok := sm.outboundTransports.Load(k)
 	if !ok {
-		return errors.NonFatalError(404, "stream not found", streamManagerCaller)
+		sm.babel.MessageDeliveryErr(origin, toSend, destPeer, errors.NonFatalError(404, "stream not found", streamManagerCaller))
+		return nil
 	}
 
 	outboundStream := outboundStreamInt.(*outboundTransport)
-	outboundStream.RLock()
-	defer outboundStream.RUnlock()
 	select {
 	case <-outboundStream.DialErr:
+		sm.babel.MessageDeliveryErr(origin, toSend, destPeer, errors.NonFatalError(500, "dial failed", streamManagerCaller))
 		return errors.NonFatalError(500, "dial failed", streamManagerCaller)
-	case <-outboundStream.Finished:
-		return errors.NonFatalError(500, "connection error", streamManagerCaller)
 	case <-outboundStream.Dialed:
-		select {
-		case <-outboundStream.Finished:
-			return errors.NonFatalError(500, "Stream finished before sending message", streamManagerCaller)
-		case outboundStream.MsgChan <- appMsgSerializer.Serialize(
+		frameToSend := appMsgSerializer.Serialize(
 			internalMsg.NewAppMessageWrapper(
 				toSend.Type(),
 				origin,
 				destination,
 				sm.babel.SerializationManager().Serialize(toSend),
-			)):
-			return nil
+			))
+		outboundStream.connMU.Lock()
+		err := outboundStream.conn.WriteFrame(frameToSend)
+		outboundStream.connMU.Unlock()
+		if err != nil {
+			sm.babel.MessageDeliveryErr(origin, toSend, destPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
+			outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
+			if loaded {
+				outboundStream := outboundStreamInt.(*outboundTransport)
+				sm.closeConn(outboundStream.conn)
+				sm.babel.OutTransportFailure(origin, destPeer)
+			}
+			return errors.NonFatalError(500, "error sending message", streamManagerCaller)
 		}
+		sm.babel.MessageDelivered(origin, toSend, destPeer)
+		return nil
 	}
 }
 
 func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.Peer) {
 	k := getKeyForConn(disconnectingProto, p)
-	if conn, loaded := sm.outboundTransports.Load(k); loaded {
-		sm.logger.Warnf("[ConnectionEvent] : Disconnecting from %s", p.String())
-		conn.(*outboundTransport).Lock()
-		close(conn.(*outboundTransport).MsgChan)
-		conn.(*outboundTransport).Unlock()
+	outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
+	if loaded {
+		outboundStream := outboundStreamInt.(*outboundTransport)
+		sm.closeConn(outboundStream.conn)
 		sm.logStreamManagerState()
 	}
 }

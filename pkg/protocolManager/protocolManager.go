@@ -23,6 +23,8 @@ type ProtocolManager interface {
 		sourceProtoID protocol.ID,
 		destProto protocol.ID,
 	)
+	MessageDelivered(sendingProto protocol.ID, msg message.Message, peer peer.Peer)
+	MessageDeliveryErr(sendingProto protocol.ID, msg message.Message, peer peer.Peer, err errors.Error)
 	SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error
 	SendNotification(notification notification.Notification) errors.Error
 
@@ -37,7 +39,7 @@ type ProtocolManager interface {
 
 	DeliverMessage(sender peer.Peer, message message.Message, destProto protocol.ID)
 	DeliverTimer(timer timer.Timer, destProto protocol.ID)
-	SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID, batch bool)
+	SendMessageAndDisconnect(toSend message.Message, destPeer peer.Peer, origin protocol.ID, destination protocol.ID)
 
 	RegisterProtocol(protocol protocol.Protocol) errors.Error
 	RegisteredProtos() []protocol.ID
