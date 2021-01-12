@@ -11,9 +11,9 @@ import (
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
 
 type ProtoHandshakeMessage struct {
-	TunnelType  uint8
 	Peer        peer.Peer
 	DialerProto protocol.ID
+	TunnelType  uint8
 }
 
 func NewProtoHandshakeMessage(dialerProto protocol.ID, peer peer.Peer, temporaryConn uint8) message.Message {

@@ -98,7 +98,6 @@ type NodeWatcherConf struct {
 	FirstHeartbeatEstimate time.Duration
 
 	AdvertiseListenAddr net.IP
-	AdvertiseListenPort int
 
 	ListenAddr net.IP
 	ListenPort int
@@ -118,7 +117,7 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 		babel:               babel,
 		conf:                config,
 		watching:            sync.Map{},
-		selfPeer:            peer.NewPeer(config.AdvertiseListenAddr, uint16(0), uint16(config.AdvertiseListenPort)),
+		selfPeer:            peer.NewPeer(config.AdvertiseListenAddr, babel.SelfPeer().ProtosPort(), uint16(config.ListenPort)),
 		conditions:          make(priorityqueue.PriorityQueue, 0),
 		logger:              logs.NewLogger(nodeWatcherCaller),
 		addCondChan:         make(chan *priorityqueue.Item),
@@ -131,7 +130,7 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 	}
 
 	if config.AdvertiseListenAddr == nil {
-		nm.selfPeer = peer.NewPeer(config.ListenAddr, uint16(0), uint16(config.AdvertiseListenPort))
+		nm.selfPeer = peer.NewPeer(config.ListenAddr, babel.SelfPeer().ProtosPort(), uint16(config.ListenPort))
 	}
 
 	listenAddr := &net.UDPAddr{
@@ -141,10 +140,12 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 
 	udpConn, err := net.ListenUDP("udp", listenAddr)
 	if err != nil {
+		panic(err)
 		nm.logger.Panic(err)
 	}
 	nm.udpConn = *udpConn
 	nm.logger.Infof("My configs: %+v", config)
+	nm.logger.Infof("Listening on addr %+v and port %d", nm.conf.ListenAddr, nm.conf.ListenPort)
 	nm.start()
 	return nm
 }
@@ -172,7 +173,7 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 		nm.logger.Panic("Tried to watch nil peer")
 	}
 
-	nm.logger.Infof("Proto %d request to watch %s", issuerProto, p.String())
+	nm.logger.Infof("Proto %d request to watch %s on port %d", issuerProto, p.String(), p.AnalyticsPort())
 
 	if _, ok := nm.watching.Load(p.String()); ok {
 		return errors.NonFatalError(409, "peer already being tracked", nodeWatcherCaller)
@@ -187,9 +188,11 @@ func (nm *NodeWatcherImpl) Watch(p peer.Peer, issuerProto protocol.ID) errors.Er
 		nm.conf.FirstHeartbeatEstimate,
 		nil,
 	)
+
 	if err != nil {
 		nm.logger.Panic(err)
 	}
+
 	nodeInfo := &NodeInfoImpl{
 		nrMessagesReceived: &nrMessages,
 		peer:               p,
@@ -210,7 +213,7 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(
 	issuerProto protocol.ID,
 	latency time.Duration,
 ) errors.Error {
-	nm.logger.Infof("Proto %d request to watch %s with initial value %s", issuerProto, p.String(), latency)
+	nm.logger.Infof("Proto %d request to watch %s with initial value %s on port %d", issuerProto, p.String(), latency, p.AnalyticsPort())
 
 	if reflect.ValueOf(p).IsNil() {
 		nm.logger.Panic("Tried to watch nil peer")
@@ -438,6 +441,7 @@ func (nm *NodeWatcherImpl) startTCPServer() {
 	listener, err := net.ListenTCP("tcp", listenAddr)
 	if err != nil {
 		nm.logger.Panic(err)
+		panic(err)
 	}
 
 	for {
@@ -509,6 +513,7 @@ func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.Frame
 
 func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
+
 	if hb.IsReply {
 		nodeInfoInt, ok := nm.watching.Load(hb.Sender.String())
 		if !ok {
@@ -518,6 +523,7 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 		nm.registerHBReply(hb, nodeInfo)
 		return nil
 	}
+
 	if hb.ForceReply {
 		//nm.logger.Infof("replying to hb message")
 		toSend := analytics.HeartbeatMessage{

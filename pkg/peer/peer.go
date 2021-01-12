@@ -67,10 +67,13 @@ func PeersEqual(p1 Peer, p2 Peer) bool {
 
 func (p *IPeer) Marshal() []byte {
 	peerBytes := make([]byte, 8)
+
 	for idx, b := range p.IP().To4() {
 		peerBytes[idx] = b
 	}
+
 	binary.BigEndian.PutUint16(peerBytes[4:], p.ProtosPort())
+
 	binary.BigEndian.PutUint16(peerBytes[6:], p.AnalyticsPort())
 	return peerBytes
 }
