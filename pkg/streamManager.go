@@ -600,12 +600,17 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 			msgSize := binary.BigEndian.Uint32(msgBuf[i : i+4])
 			i += 4
 			if msgSize == 0 {
+				if i < len(msgBuf) {
+					sm.logger.Errorf("returning from batch read without reading all of the batch contents (%d bytes remaining)", i-len(msgBuf))
+				}
 				break
 			}
+
 			if len(msgBuf) < i+int(msgSize) {
 				sm.logger.Errorf("Msg size is %d and i: %d but only have %d bytes total to read from batch", msgSize, i, len(msgBuf))
 				break
 			}
+
 			msgGeneric := deserializer.Deserialize(msgBuf[i : i+int(msgSize)])
 			msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
 			sm.logger.Infof("Read %d bytes from %s", msgSize, newPeer.String())
