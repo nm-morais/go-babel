@@ -143,41 +143,46 @@ func (sm *babelStreamManager) handleBatchDispatches() {
 			transport := transportInt.(*outboundTransport)
 			transport.batchMU.Lock()
 			if len(transport.batchBytes) > 0 {
-				transport.connMU.Lock()
-				err := transport.conn.WriteFrame(transport.batchBytes)
-				if err != nil {
-					select {
-					case <-transport.Finished:
-					default:
-						close(transport.Finished)
-					}
-					transport.connMU.Unlock()
-					sm.logger.Errorf("batch write err: %s", err.Error())
-					for _, msgGeneric := range transport.batchMessages {
-						sm.logger.Errorf("delivering messageDeliveryErr of msg %s to: %d", reflect.TypeOf(msgGeneric.msg), msgGeneric.originProto)
-						sm.babel.MessageDeliveryErr(msgGeneric.originProto, msgGeneric.msg, transport.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
-					}
-					outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(nextItem.connKey)
-					if loaded {
-						outboundStream := outboundStreamInt.(*outboundTransport)
-						sm.closeConn(outboundStream.conn)
-						sm.babel.OutTransportFailure(outboundStream.originProto, transport.targetPeer)
-					}
-					transport.batchMU.Unlock()
-					continue
-				}
-				transport.connMU.Unlock()
+				sm.WriteMsgFrameToBatch(nextItem.connKey, transport)
+				transport.batchMU.Unlock()
+				continue
 			}
-			sm.logger.Infof("delivered batch to %s successfully", transport.targetPeer.String())
-			for idx, v := range transport.batchMessages {
-				sm.logger.Infof("Message %d in batch sent to %s: %s", idx, transport.targetPeer.String(), reflect.TypeOf(v.msg))
-			}
-			transport.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
-			transport.batchMessages = make([]struct {
-				originProto uint16
-				msg         message.Message
-			}, 0)
 			transport.batchMU.Unlock()
+			// 	transport.connMU.Lock()
+			// 	err := transport.conn.WriteFrame(transport.batchBytes)
+			// 	if err != nil {
+			// 		select {
+			// 		case <-transport.Finished:
+			// 		default:
+			// 			close(transport.Finished)
+			// 		}
+			// 		transport.connMU.Unlock()
+			// 		sm.logger.Errorf("batch write err: %s", err.Error())
+			// 		for _, msgGeneric := range transport.batchMessages {
+			// 			sm.logger.Errorf("delivering messageDeliveryErr of msg %s to: %d", reflect.TypeOf(msgGeneric.msg), msgGeneric.originProto)
+			// 			sm.babel.MessageDeliveryErr(msgGeneric.originProto, msgGeneric.msg, transport.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
+			// 		}
+			// 		outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(nextItem.connKey)
+			// 		if loaded {
+			// 			outboundStream := outboundStreamInt.(*outboundTransport)
+			// 			sm.closeConn(outboundStream.conn)
+			// 			sm.babel.OutTransportFailure(outboundStream.originProto, transport.targetPeer)
+			// 		}
+			// 		transport.batchMU.Unlock()
+			// 		continue
+			// 	}
+			// 	transport.connMU.Unlock()
+			// }
+			// sm.logger.Infof("delivered batch to %s successfully", transport.targetPeer.String())
+			// for idx, msgGeneric := range transport.batchMessages {
+			// 	sm.logger.Infof("Message %d in batch sent to %s: %s", idx, transport.targetPeer.String(), reflect.TypeOf(msgGeneric.msg))
+			// 	sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, transport.targetPeer)
+			// }
+			// transport.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
+			// transport.batchMessages = make([]struct {
+			// 	originProto uint16
+			// 	msg         message.Message
+			// }, 0)
 			nextItem.deadline = time.Now().Add(sm.conf.BatchTimeout)
 			heap.Push(&pq, &priorityqueue.Item{
 				Value:    nextItem,
@@ -467,19 +472,17 @@ func (sm *babelStreamManager) SendMessage(
 		err := errors.NonFatalError(500, "conn finished", streamManagerCaller)
 		sm.babel.MessageDeliveryErr(origin, toSend, destPeer, err)
 		return err
-
 	case <-outboundStream.Dialed:
-		frameToSend := appMsgSerializer.Serialize(
+		outboundStream.batchMU.Lock()
+		defer outboundStream.batchMU.Unlock()
+		msgBytes := appMsgSerializer.Serialize(
 			internalMsg.NewAppMessageWrapper(
 				toSend.Type(),
 				origin,
 				destination,
 				sm.babel.SerializationManager().Serialize(toSend),
 			))
-
 		if batch {
-			outboundStream.batchMU.Lock()
-			defer outboundStream.batchMU.Unlock()
 			outboundStream.batchMessages = append(outboundStream.batchMessages, struct {
 				originProto uint16
 				msg         message.Message
@@ -487,41 +490,17 @@ func (sm *babelStreamManager) SendMessage(
 				originProto: origin,
 				msg:         toSend,
 			})
-			outboundStream.batchBytes = append(outboundStream.batchBytes, appMsgSerializer.Serialize(
-				internalMsg.NewAppMessageWrapper(
-					toSend.Type(),
-					origin,
-					destination,
-					sm.babel.SerializationManager().Serialize(toSend),
-				))...)
+			outboundStream.batchBytes = append(outboundStream.batchBytes, msgBytes...)
 			if len(outboundStream.batchBytes) > sm.conf.BatchMaxSizeBytes {
-				outboundStream.connMU.Lock()
-				err := outboundStream.conn.WriteFrame(frameToSend)
-				if err != nil {
-					select {
-					case <-outboundStream.Finished:
-					default:
-						close(outboundStream.Finished)
-					}
-					outboundStream.connMU.Unlock()
-					for _, msgGeneric := range outboundStream.batchMessages {
-						sm.babel.MessageDeliveryErr(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
-					}
-					outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
-					if loaded {
-						outboundStream := outboundStreamInt.(*outboundTransport)
-						sm.closeConn(outboundStream.conn)
-						sm.babel.OutTransportFailure(origin, destPeer)
-					}
-					return errors.NonFatalError(500, "error sending message", streamManagerCaller)
-				}
-				outboundStream.connMU.Unlock()
+				return sm.WriteMsgFrameToBatch(k, outboundStream)
 			}
 			return nil
 		}
 
+		sizeBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(sizeBytes, uint32(len(msgBytes)))
 		outboundStream.connMU.Lock()
-		err := outboundStream.conn.WriteFrame(frameToSend)
+		err := outboundStream.conn.WriteFrame(append(sizeBytes, msgBytes...))
 		if err != nil {
 			select {
 			case <-outboundStream.Finished:
@@ -532,7 +511,7 @@ func (sm *babelStreamManager) SendMessage(
 			sm.babel.MessageDeliveryErr(origin, toSend, destPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
 			outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
 			if loaded {
-				outboundStream := outboundStreamInt.(*outboundTransport)
+				outboundStream = outboundStreamInt.(*outboundTransport)
 				sm.closeConn(outboundStream.conn)
 				sm.babel.OutTransportFailure(origin, destPeer)
 			}
@@ -542,6 +521,44 @@ func (sm *babelStreamManager) SendMessage(
 		sm.babel.MessageDelivered(origin, toSend, destPeer)
 		return nil
 	}
+}
+
+func (sm *babelStreamManager) WriteMsgFrameToBatch(streamKey string, outboundStream *outboundTransport) errors.Error {
+	sm.logger.Infof("added message to batch to %s successfully", outboundStream.targetPeer.String())
+	sizeBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(sizeBytes, uint32(len(outboundStream.batchBytes)))
+	outboundStream.connMU.Lock()
+	err := outboundStream.conn.WriteFrame(append(sizeBytes, outboundStream.batchBytes...))
+	if err != nil {
+		select {
+		case <-outboundStream.Finished:
+		default:
+			close(outboundStream.Finished)
+		}
+		outboundStream.connMU.Unlock()
+		for _, msgGeneric := range outboundStream.batchMessages {
+			sm.babel.MessageDeliveryErr(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
+		}
+		outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(streamKey)
+		if loaded {
+			outboundStream := outboundStreamInt.(*outboundTransport)
+			sm.closeConn(outboundStream.conn)
+			sm.babel.OutTransportFailure(outboundStream.originProto, outboundStream.targetPeer)
+		}
+		return errors.NonFatalError(500, "error sending message", streamManagerCaller)
+	}
+	outboundStream.connMU.Unlock()
+	sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
+	for idx, msgGeneric := range outboundStream.batchMessages {
+		sm.logger.Infof("Message %d in batch sent to %s: %s", idx, outboundStream.targetPeer.String(), reflect.TypeOf(msgGeneric.msg))
+		sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer)
+	}
+	outboundStream.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
+	outboundStream.batchMessages = make([]struct {
+		originProto uint16
+		msg         message.Message
+	}, 0)
+	return nil
 }
 
 func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.Peer) {
@@ -573,14 +590,19 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 			return
 		}
 
-		if len(msgBuf) > 0 {
-			go func() {
-				//sm.logger.Infof("Read %d bytes from %s", n, newPeer.ToString())
-				msgGeneric := deserializer.Deserialize(msgBuf)
-				msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
-				appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
-				sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
-			}()
+		if len(msgBuf) == 0 {
+			panic("got 0 bytes from conn")
+		}
+
+		for i := 0; i < len(msgBuf); {
+			msgSize := binary.BigEndian.Uint32(msgBuf[:i+4])
+			i += 4
+			msgGeneric := deserializer.Deserialize(msgBuf[i : i+int(msgSize)])
+			msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
+			sm.logger.Infof("Read %d bytes from %s", msgSize, newPeer.String())
+			appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
+			sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
+			i += int(msgSize)
 		}
 	}
 }
