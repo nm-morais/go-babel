@@ -486,7 +486,7 @@ func (sm *babelStreamManager) SendMessage(
 			))
 		sizeBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(sizeBytes, uint32(len(outboundStream.batchBytes)))
-		msgBytes = append(msgBytes, sizeBytes...)
+		msgBytes = append(sizeBytes, msgBytes...)
 		if batch {
 			outboundStream.batchMessages = append(outboundStream.batchMessages, struct {
 				originProto uint16
