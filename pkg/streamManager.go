@@ -597,8 +597,11 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 		}
 
 		for i := 0; i < len(msgBuf); {
-			msgSize := binary.BigEndian.Uint32(msgBuf[:i+4])
+			msgSize := binary.BigEndian.Uint32(msgBuf[i : i+4])
 			i += 4
+			if msgSize == 0 {
+				break
+			}
 			if len(msgBuf) < i+int(msgSize) {
 				sm.logger.Errorf("Msg size is %d and i: %d but only have %d bytes total to read from batch", msgSize, i, len(msgBuf))
 				break
