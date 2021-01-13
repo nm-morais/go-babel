@@ -125,6 +125,8 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 		removeNodeCondsChan: make(chan peer.Peer),
 	}
 
+	nm.logger.Infof("Starting nodeWatcher with config: %+v", config)
+
 	if nm.conf.OldLatencyWeight+nm.conf.NewLatencyWeight != 1 {
 		nm.logger.Panic("OldLatencyWeight + NewLatencyWeight != 1")
 	}

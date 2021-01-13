@@ -100,12 +100,12 @@ func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerC
 		logger:              logs.NewLogger(streamManagerCaller),
 		addBatchControlChan: make(chan *outboundTransportBatchControl),
 	}
+	sm.logger.Infof("Starting streamManager with config: %+v", conf)
 	go sm.handleBatchDispatches()
 	return sm
 }
 
 func (sm *babelStreamManager) handleBatchDispatches() {
-
 	var t *time.Timer
 	pq := priorityqueue.PriorityQueue{}
 	for {
