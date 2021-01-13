@@ -351,12 +351,14 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, addr net.Addr) errors.Error {
 	k := getKeyForConn(dialingProto, toDial)
 	newOutboundTransportAux := &outboundTransport{
-		Addr:    addr,
-		Dialed:  make(chan interface{}),
-		DialErr: make(chan interface{}),
-		conn:    nil,
-		connMU:  sync.Mutex{},
-		batchMU: sync.Mutex{},
+		Addr:        addr,
+		Dialed:      make(chan interface{}),
+		originProto: dialingProto,
+		Finished:    make(chan interface{}),
+		DialErr:     make(chan interface{}),
+		conn:        nil,
+		connMU:      sync.Mutex{},
+		batchMU:     sync.Mutex{},
 		batchMessages: make([]struct {
 			originProto uint16
 			msg         message.Message
