@@ -482,6 +482,9 @@ func (sm *babelStreamManager) SendMessage(
 				destination,
 				sm.babel.SerializationManager().Serialize(toSend),
 			))
+		sizeBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(sizeBytes, uint32(len(outboundStream.batchBytes)))
+		msgBytes = append(msgBytes, sizeBytes...)
 		if batch {
 			outboundStream.batchMessages = append(outboundStream.batchMessages, struct {
 				originProto uint16
@@ -490,6 +493,7 @@ func (sm *babelStreamManager) SendMessage(
 				originProto: origin,
 				msg:         toSend,
 			})
+
 			outboundStream.batchBytes = append(outboundStream.batchBytes, msgBytes...)
 			if len(outboundStream.batchBytes) > sm.conf.BatchMaxSizeBytes {
 				return sm.WriteMsgFrameToBatch(k, outboundStream)
@@ -497,10 +501,8 @@ func (sm *babelStreamManager) SendMessage(
 			return nil
 		}
 
-		sizeBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(sizeBytes, uint32(len(msgBytes)))
 		outboundStream.connMU.Lock()
-		err := outboundStream.conn.WriteFrame(append(sizeBytes, msgBytes...))
+		err := outboundStream.conn.WriteFrame(msgBytes)
 		if err != nil {
 			select {
 			case <-outboundStream.Finished:
@@ -525,10 +527,8 @@ func (sm *babelStreamManager) SendMessage(
 
 func (sm *babelStreamManager) WriteMsgFrameToBatch(streamKey string, outboundStream *outboundTransport) errors.Error {
 	sm.logger.Infof("added message to batch to %s successfully", outboundStream.targetPeer.String())
-	sizeBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(sizeBytes, uint32(len(outboundStream.batchBytes)))
 	outboundStream.connMU.Lock()
-	err := outboundStream.conn.WriteFrame(append(sizeBytes, outboundStream.batchBytes...))
+	err := outboundStream.conn.WriteFrame(outboundStream.batchBytes)
 	if err != nil {
 		select {
 		case <-outboundStream.Finished:
@@ -550,7 +550,7 @@ func (sm *babelStreamManager) WriteMsgFrameToBatch(streamKey string, outboundStr
 	outboundStream.connMU.Unlock()
 	sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
 	for idx, msgGeneric := range outboundStream.batchMessages {
-		sm.logger.Infof("Message %d in batch sent to %s: %s", idx, outboundStream.targetPeer.String(), reflect.TypeOf(msgGeneric.msg))
+		sm.logger.Infof("Message %d in batch sent to %s: (%+v)", idx, outboundStream.targetPeer.String(), msgGeneric.msg)
 		sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer)
 	}
 	outboundStream.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
