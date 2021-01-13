@@ -309,7 +309,6 @@ func (nm *NodeWatcherImpl) startHbRoutine(nodeInfo *NodeInfoImpl) {
 			case <-nodeInfo.unwatch:
 				return
 			}
-
 		}
 	}
 }
