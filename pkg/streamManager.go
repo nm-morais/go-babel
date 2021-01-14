@@ -475,8 +475,6 @@ func (sm *babelStreamManager) SendMessage(
 		sm.babel.MessageDeliveryErr(origin, toSend, destPeer, err)
 		return err
 	case <-outboundStream.Dialed:
-		outboundStream.batchMU.Lock()
-		defer outboundStream.batchMU.Unlock()
 		msgBytes := appMsgSerializer.Serialize(
 			internalMsg.NewAppMessageWrapper(
 				toSend.Type(),
@@ -485,9 +483,11 @@ func (sm *babelStreamManager) SendMessage(
 				sm.babel.SerializationManager().Serialize(toSend),
 			))
 		sizeBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(sizeBytes, uint32(len(outboundStream.batchBytes)))
+		binary.BigEndian.PutUint32(sizeBytes, uint32(len(msgBytes)))
 		msgBytes = append(sizeBytes, msgBytes...)
 		if batch {
+			outboundStream.batchMU.Lock()
+			defer outboundStream.batchMU.Unlock()
 			outboundStream.batchMessages = append(outboundStream.batchMessages, struct {
 				originProto uint16
 				msg         message.Message
@@ -599,21 +599,13 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 		for i := 0; i < len(msgBuf); {
 			msgSize := binary.BigEndian.Uint32(msgBuf[i : i+4])
 			i += 4
-			if msgSize == 0 {
-				if i < len(msgBuf) {
-					sm.logger.Errorf("returning from batch read without reading all of the batch contents (%d bytes remaining)", i-len(msgBuf))
-				}
-				break
-			}
 
-			if len(msgBuf) < i+int(msgSize) {
-				sm.logger.Errorf("Msg size is %d and i: %d but only have %d bytes total to read from batch", msgSize, i, len(msgBuf))
-				break
+			if msgSize == 0 && len(msgBuf) > i+int(msgSize) {
+				sm.logger.Panicf("Msg size is %d and i: %d but still have %d bytes total to read from batch", msgSize, i, len(msgBuf)-i)
 			}
 
 			msgGeneric := deserializer.Deserialize(msgBuf[i : i+int(msgSize)])
 			msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
-			sm.logger.Infof("Read %d bytes from %s", msgSize, newPeer.String())
 			appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
 			sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
 			i += int(msgSize)
