@@ -143,46 +143,9 @@ func (sm *babelStreamManager) handleBatchDispatches() {
 			transport := transportInt.(*outboundTransport)
 			transport.batchMU.Lock()
 			if len(transport.batchBytes) > 0 {
-				sm.WriteMsgFrameToBatch(nextItem.connKey, transport)
-				transport.batchMU.Unlock()
-				continue
+				sm.FlushBatch(nextItem.connKey, transport)
 			}
 			transport.batchMU.Unlock()
-			// 	transport.connMU.Lock()
-			// 	err := transport.conn.WriteFrame(transport.batchBytes)
-			// 	if err != nil {
-			// 		select {
-			// 		case <-transport.Finished:
-			// 		default:
-			// 			close(transport.Finished)
-			// 		}
-			// 		transport.connMU.Unlock()
-			// 		sm.logger.Errorf("batch write err: %s", err.Error())
-			// 		for _, msgGeneric := range transport.batchMessages {
-			// 			sm.logger.Errorf("delivering messageDeliveryErr of msg %s to: %d", reflect.TypeOf(msgGeneric.msg), msgGeneric.originProto)
-			// 			sm.babel.MessageDeliveryErr(msgGeneric.originProto, msgGeneric.msg, transport.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
-			// 		}
-			// 		outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(nextItem.connKey)
-			// 		if loaded {
-			// 			outboundStream := outboundStreamInt.(*outboundTransport)
-			// 			sm.closeConn(outboundStream.conn)
-			// 			sm.babel.OutTransportFailure(outboundStream.originProto, transport.targetPeer)
-			// 		}
-			// 		transport.batchMU.Unlock()
-			// 		continue
-			// 	}
-			// 	transport.connMU.Unlock()
-			// }
-			// sm.logger.Infof("delivered batch to %s successfully", transport.targetPeer.String())
-			// for idx, msgGeneric := range transport.batchMessages {
-			// 	sm.logger.Infof("Message %d in batch sent to %s: %s", idx, transport.targetPeer.String(), reflect.TypeOf(msgGeneric.msg))
-			// 	sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, transport.targetPeer)
-			// }
-			// transport.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
-			// transport.batchMessages = make([]struct {
-			// 	originProto uint16
-			// 	msg         message.Message
-			// }, 0)
 			nextItem.deadline = time.Now().Add(sm.conf.BatchTimeout)
 			heap.Push(&pq, &priorityqueue.Item{
 				Value:    nextItem,
@@ -498,7 +461,7 @@ func (sm *babelStreamManager) SendMessage(
 
 			outboundStream.batchBytes = append(outboundStream.batchBytes, msgBytes...)
 			if len(outboundStream.batchBytes) > sm.conf.BatchMaxSizeBytes {
-				return sm.WriteMsgFrameToBatch(k, outboundStream)
+				return sm.FlushBatch(k, outboundStream)
 			}
 			return nil
 		}
@@ -527,7 +490,7 @@ func (sm *babelStreamManager) SendMessage(
 	}
 }
 
-func (sm *babelStreamManager) WriteMsgFrameToBatch(streamKey string, outboundStream *outboundTransport) errors.Error {
+func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outboundTransport) errors.Error {
 	sm.logger.Infof("added message to batch to %s successfully", outboundStream.targetPeer.String())
 	outboundStream.connMU.Lock()
 	err := outboundStream.conn.WriteFrame(outboundStream.batchBytes)
@@ -552,7 +515,7 @@ func (sm *babelStreamManager) WriteMsgFrameToBatch(streamKey string, outboundStr
 	outboundStream.connMU.Unlock()
 	sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
 	for idx, msgGeneric := range outboundStream.batchMessages {
-		sm.logger.Infof("Message %d in batch sent to %s: (%+v)", idx, outboundStream.targetPeer.String(), msgGeneric.msg)
+		sm.logger.Infof("Message %d of type %s in batch sent to %s", idx, reflect.TypeOf(msgGeneric.msg), outboundStream.targetPeer.String())
 		sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer)
 	}
 	outboundStream.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
@@ -599,7 +562,6 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 		for i := 0; i < len(msgBuf); {
 			msgSize := binary.BigEndian.Uint32(msgBuf[i : i+4])
 			i += 4
-
 			if msgSize == 0 && len(msgBuf) > i+int(msgSize) {
 				sm.logger.Panicf("Msg size is %d and i: %d but still have %d bytes total to read from batch", msgSize, i, len(msgBuf)-i)
 			}
