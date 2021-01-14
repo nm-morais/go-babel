@@ -75,6 +75,7 @@ type outboundTransport struct {
 	targetPeer  peer.Peer
 	originProto protocol.ID
 
+	batchFlush    chan time.Time
 	batchMessages []struct {
 		originProto protocol.ID
 		msg         message.Message
@@ -101,11 +102,11 @@ func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerC
 		addBatchControlChan: make(chan *outboundTransportBatchControl),
 	}
 	sm.logger.Infof("Starting streamManager with config: %+v", conf)
-	go sm.handleBatchDispatches()
+	go sm.flushBatchesPeriodic()
 	return sm
 }
 
-func (sm *babelStreamManager) handleBatchDispatches() {
+func (sm *babelStreamManager) flushBatchesPeriodic() {
 	var t *time.Timer
 	pq := priorityqueue.PriorityQueue{}
 	for {
@@ -121,6 +122,13 @@ func (sm *babelStreamManager) handleBatchDispatches() {
 			heap.Init(&pq)
 		}
 		nextItem := heap.Pop(&pq).(*priorityqueue.Item).Value.(*outboundTransportBatchControl)
+		transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
+		if !stillActive {
+			sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+			continue
+		}
+		transport := transportInt.(*outboundTransport)
+
 		sm.logger.Infof("Next batch to dispatch: %s", nextItem.connKey)
 		t = time.NewTimer(time.Until(nextItem.deadline))
 		select {
@@ -138,7 +146,7 @@ func (sm *babelStreamManager) handleBatchDispatches() {
 			transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
 				sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
-				continue
+				break
 			}
 			transport := transportInt.(*outboundTransport)
 			transport.batchMU.Lock()
@@ -153,7 +161,15 @@ func (sm *babelStreamManager) handleBatchDispatches() {
 			})
 			heap.Init(&pq)
 			sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
+		case flushTime := <-transport.batchFlush:
+			nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout) // TODO review this
+			heap.Push(&pq, &priorityqueue.Item{
+				Value:    nextItem,
+				Priority: nextItem.deadline.UnixNano(),
+			})
+			heap.Init(&pq)
 		}
+		t.Stop()
 	}
 }
 
@@ -313,7 +329,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 
 func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, addr net.Addr) errors.Error {
 	k := getKeyForConn(dialingProto, toDial)
-	newOutboundTransportAux := &outboundTransport{
+	newOutboundTransportGeneric, loaded := sm.outboundTransports.LoadOrStore(k, &outboundTransport{
 		Addr:        addr,
 		Dialed:      make(chan interface{}),
 		originProto: dialingProto,
@@ -328,8 +344,8 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		}, 0),
 		batchBytes: make([]byte, 0, sm.conf.BatchMaxSizeBytes),
 		targetPeer: toDial,
-	}
-	newOutboundTransportGeneric, loaded := sm.outboundTransports.LoadOrStore(k, newOutboundTransportAux)
+		batchFlush: make(chan time.Time, 1),
+	})
 	newOutboundTransport := newOutboundTransportGeneric.(*outboundTransport)
 	if loaded {
 		return errors.NonFatalError(500, "connection already up", streamManagerCaller)
@@ -343,11 +359,6 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 			sm.outboundTransports.Delete(k)
 			return
 		}
-		// sm.logger.Infof("Done dialing node %s", toDial.Addr())
-		// sm.logger.Infof("Exchanging protos")
-		//sm.logger.Info("Remote protos: %d", handshakeMsg.Protos)
-		//sm.logger.Infof("Starting handshake...")
-
 		switch newStreamTyped := conn.(type) {
 		case net.Conn:
 			frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
@@ -523,6 +534,12 @@ func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outbo
 		originProto uint16
 		msg         message.Message
 	}, 0)
+
+	select {
+	case outboundStream.batchFlush <- time.Now():
+	default:
+	}
+
 	return nil
 }
 
