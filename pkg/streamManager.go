@@ -109,6 +109,8 @@ func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerC
 func (sm *babelStreamManager) flushBatchesPeriodic() {
 	var t *time.Timer
 	pq := priorityqueue.PriorityQueue{}
+
+outer:
 	for {
 		if len(pq) == 0 {
 			sm.logger.Info("No out connections, waiting for new connection")
@@ -128,7 +130,21 @@ func (sm *babelStreamManager) flushBatchesPeriodic() {
 			continue
 		}
 		transport := transportInt.(*outboundTransport)
-
+		select {
+		case flushTime := <-transport.batchFlush:
+			if flushTime.Add(sm.conf.BatchTimeout).After(nextItem.deadline) {
+				sm.logger.Infof("batch to %s was flushed while wating for other batch, adjusting next trigger", nextItem.connKey)
+				nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout)
+				pqItem := &priorityqueue.Item{
+					Value:    nextItem,
+					Priority: time.Now().Add(sm.conf.BatchTimeout).UnixNano(),
+				}
+				heap.Push(&pq, pqItem)
+				heap.Init(&pq)
+				continue outer
+			}
+		default:
+		}
 		sm.logger.Infof("Next batch to dispatch: %s", nextItem.connKey)
 		t = time.NewTimer(time.Until(nextItem.deadline))
 		select {
@@ -162,12 +178,14 @@ func (sm *babelStreamManager) flushBatchesPeriodic() {
 			heap.Init(&pq)
 			sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
 		case flushTime := <-transport.batchFlush:
+			sm.logger.Infof("batch to %s was flushed while wating for trigger", nextItem.connKey)
 			nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout) // TODO review this
 			heap.Push(&pq, &priorityqueue.Item{
 				Value:    nextItem,
 				Priority: nextItem.deadline.UnixNano(),
 			})
 			heap.Init(&pq)
+			sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
 		}
 		t.Stop()
 	}
