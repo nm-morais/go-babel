@@ -113,9 +113,9 @@ func (sm *babelStreamManager) flushBatchesPeriodic() {
 outer:
 	for {
 		if len(pq) == 0 {
-			sm.logger.Info("No out connections, waiting for new connection")
+			// sm.logger.Info("No out connections, waiting for new connection")
 			newBatchControl := <-sm.addBatchControlChan
-			sm.logger.Infof("Received batch control : %s", newBatchControl.connKey)
+			// sm.logger.Infof("Received batch control : %s", newBatchControl.connKey)
 			pqItem := &priorityqueue.Item{
 				Value:    newBatchControl,
 				Priority: time.Now().Add(sm.conf.BatchTimeout).UnixNano(),
@@ -126,14 +126,14 @@ outer:
 		nextItem := heap.Pop(&pq).(*priorityqueue.Item).Value.(*outboundTransportBatchControl)
 		transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 		if !stillActive {
-			sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+			// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
 			continue
 		}
 		transport := transportInt.(*outboundTransport)
 		select {
 		case flushTime := <-transport.batchFlush:
 			if flushTime.Add(sm.conf.BatchTimeout).After(nextItem.deadline) {
-				sm.logger.Infof("batch to %s was flushed while wating for other batch, adjusting next trigger", nextItem.connKey)
+				// sm.logger.Infof("batch to %s was flushed while wating for other batch, adjusting next trigger", nextItem.connKey)
 				nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout)
 				pqItem := &priorityqueue.Item{
 					Value:    nextItem,
@@ -145,11 +145,11 @@ outer:
 			}
 		default:
 		}
-		sm.logger.Infof("Next batch to dispatch: %s", nextItem.connKey)
+		// sm.logger.Infof("Next batch to dispatch: %s", nextItem.connKey)
 		t = time.NewTimer(time.Until(nextItem.deadline))
 		select {
 		case newBatchControl := <-sm.addBatchControlChan:
-			sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
+			// sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
 			pqItem := &priorityqueue.Item{
 				Value:    newBatchControl,
 				Priority: time.Now().Add(sm.conf.BatchTimeout).UnixNano(),
@@ -158,10 +158,10 @@ outer:
 			heap.Init(&pq)
 			t.Stop()
 		case <-t.C:
-			sm.logger.Infof("Batch emission to %s triggered", nextItem.connKey)
+			// sm.logger.Infof("Batch emission to %s triggered", nextItem.connKey)
 			transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
-				sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+				// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
 				break
 			}
 			transport := transportInt.(*outboundTransport)
@@ -176,16 +176,16 @@ outer:
 				Priority: nextItem.deadline.UnixNano(),
 			})
 			heap.Init(&pq)
-			sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
+			// sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
 		case flushTime := <-transport.batchFlush:
-			sm.logger.Infof("batch to %s was flushed while wating for trigger", nextItem.connKey)
+			// sm.logger.Infof("batch to %s was flushed while wating for trigger", nextItem.connKey)
 			nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout) // TODO review this
 			heap.Push(&pq, &priorityqueue.Item{
 				Value:    nextItem,
 				Priority: nextItem.deadline.UnixNano(),
 			})
 			heap.Init(&pq)
-			sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
+			// sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
 		}
 		t.Stop()
 	}
