@@ -537,7 +537,7 @@ func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outbo
 	}
 	outboundStream.connMU.Unlock()
 	// sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
-	for idx, msgGeneric := range outboundStream.batchMessages {
+	for _, msgGeneric := range outboundStream.batchMessages {
 		// sm.logger.Infof("Message %d of type %s in batch sent to %s", idx, reflect.TypeOf(msgGeneric.msg), outboundStream.targetPeer.String())
 		sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer)
 	}
