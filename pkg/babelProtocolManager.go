@@ -201,7 +201,6 @@ func (p *protoManager) SendMessage(
 	destination protocol.ID,
 	batch bool,
 ) {
-
 	proto, ok := p.protocols.Load(origin)
 	defer func() {
 		if r := recover(); r != nil {

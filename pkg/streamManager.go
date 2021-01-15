@@ -111,6 +111,7 @@ func (sm *babelStreamManager) flushBatchesPeriodic() {
 	pq := priorityqueue.PriorityQueue{}
 
 	addBatchControlToQueue := func(batchControl *outboundTransportBatchControl, nextTrigger time.Time) {
+		sm.logger.Infof("Adding batch control %s to queue", batchControl.connKey)
 		batchControl.deadline = nextTrigger
 		pqItem := &priorityqueue.Item{
 			Value:    batchControl,
@@ -125,14 +126,13 @@ outer:
 		if len(pq) == 0 {
 			// sm.logger.Info("No out connections, waiting for new connection")
 			newBatchControl := <-sm.addBatchControlChan
-			// sm.logger.Infof("Received batch control : %s", newBatchControl.connKey)
 			addBatchControlToQueue(newBatchControl, time.Now().Add(sm.conf.BatchTimeout))
 		}
 
 		nextItem := heap.Pop(&pq).(*priorityqueue.Item).Value.(*outboundTransportBatchControl)
 		transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 		if !stillActive {
-			// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+			sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
 			continue
 		}
 		transport := transportInt.(*outboundTransport)
@@ -148,15 +148,17 @@ outer:
 
 		// sm.logger.Infof("Next batch to dispatch: %s", nextItem.connKey)
 		t = time.NewTimer(time.Until(nextItem.deadline))
+		// sm.logger.Infof("Waiting %+v for next deadline...", time.Until(nextItem.deadline))
 		select {
 		case newBatchControl := <-sm.addBatchControlChan:
 			// sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
 			addBatchControlToQueue(newBatchControl, time.Now().Add(sm.conf.BatchTimeout))
+			addBatchControlToQueue(nextItem, nextItem.deadline)
 		case <-t.C:
 			// sm.logger.Infof("Batch emission to %s triggered", nextItem.connKey)
 			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
-				// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+				// sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
 				break
 			}
 			addBatchControlToQueue(nextItem, time.Now().Add(sm.conf.BatchTimeout))
@@ -171,11 +173,13 @@ outer:
 		case flushTime := <-transport.batchFlush:
 			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
-				// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+				// sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
 				break
 			}
 			addBatchControlToQueue(nextItem, flushTime.Add(sm.conf.BatchTimeout))
 			// sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
+		case <-time.After(2 * sm.conf.BatchTimeout):
+			// panic("batch control thread is stuck")
 		}
 		t.Stop()
 	}
@@ -477,6 +481,7 @@ func (sm *babelStreamManager) SendMessage(
 				originProto: origin,
 				msg:         toSend,
 			})
+			// sm.logger.Infof("Added message of type %s to batch to %s", reflect.TypeOf(toSend), destPeer.String())
 
 			outboundStream.batchBytes = append(outboundStream.batchBytes, msgBytes...)
 			if len(outboundStream.batchBytes) > sm.conf.BatchMaxSizeBytes {
@@ -531,9 +536,9 @@ func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outbo
 		return errors.NonFatalError(500, "error sending message", streamManagerCaller)
 	}
 	outboundStream.connMU.Unlock()
-	sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
+	// sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
 	for idx, msgGeneric := range outboundStream.batchMessages {
-		sm.logger.Infof("Message %d of type %s in batch sent to %s", idx, reflect.TypeOf(msgGeneric.msg), outboundStream.targetPeer.String())
+		// sm.logger.Infof("Message %d of type %s in batch sent to %s", idx, reflect.TypeOf(msgGeneric.msg), outboundStream.targetPeer.String())
 		sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer)
 	}
 	outboundStream.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
