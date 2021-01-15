@@ -110,19 +110,25 @@ func (sm *babelStreamManager) flushBatchesPeriodic() {
 	var t *time.Timer
 	pq := priorityqueue.PriorityQueue{}
 
+	addBatchControlToQueue := func(batchControl *outboundTransportBatchControl, nextTrigger time.Time) {
+		batchControl.deadline = nextTrigger
+		pqItem := &priorityqueue.Item{
+			Value:    batchControl,
+			Priority: nextTrigger.UnixNano(),
+		}
+		heap.Push(&pq, pqItem)
+		heap.Init(&pq)
+	}
+
 outer:
 	for {
 		if len(pq) == 0 {
 			// sm.logger.Info("No out connections, waiting for new connection")
 			newBatchControl := <-sm.addBatchControlChan
 			// sm.logger.Infof("Received batch control : %s", newBatchControl.connKey)
-			pqItem := &priorityqueue.Item{
-				Value:    newBatchControl,
-				Priority: time.Now().Add(sm.conf.BatchTimeout).UnixNano(),
-			}
-			heap.Push(&pq, pqItem)
-			heap.Init(&pq)
+			addBatchControlToQueue(newBatchControl, time.Now().Add(sm.conf.BatchTimeout))
 		}
+
 		nextItem := heap.Pop(&pq).(*priorityqueue.Item).Value.(*outboundTransportBatchControl)
 		transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 		if !stillActive {
@@ -134,57 +140,41 @@ outer:
 		case flushTime := <-transport.batchFlush:
 			if flushTime.Add(sm.conf.BatchTimeout).After(nextItem.deadline) {
 				// sm.logger.Infof("batch to %s was flushed while wating for other batch, adjusting next trigger", nextItem.connKey)
-				nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout)
-				pqItem := &priorityqueue.Item{
-					Value:    nextItem,
-					Priority: time.Now().Add(sm.conf.BatchTimeout).UnixNano(),
-				}
-				heap.Push(&pq, pqItem)
-				heap.Init(&pq)
+				addBatchControlToQueue(nextItem, flushTime.Add(sm.conf.BatchTimeout))
 				continue outer
 			}
 		default:
 		}
+
 		// sm.logger.Infof("Next batch to dispatch: %s", nextItem.connKey)
 		t = time.NewTimer(time.Until(nextItem.deadline))
 		select {
 		case newBatchControl := <-sm.addBatchControlChan:
 			// sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
-			pqItem := &priorityqueue.Item{
-				Value:    newBatchControl,
-				Priority: time.Now().Add(sm.conf.BatchTimeout).UnixNano(),
-			}
-			heap.Push(&pq, pqItem)
-			heap.Init(&pq)
-			t.Stop()
+			addBatchControlToQueue(newBatchControl, time.Now().Add(sm.conf.BatchTimeout))
 		case <-t.C:
 			// sm.logger.Infof("Batch emission to %s triggered", nextItem.connKey)
-			transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
+			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
 				// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
 				break
 			}
-			transport := transportInt.(*outboundTransport)
-			transport.batchMU.Lock()
-			if len(transport.batchBytes) > 0 {
-				sm.FlushBatch(nextItem.connKey, transport)
-			}
-			transport.batchMU.Unlock()
-			nextItem.deadline = time.Now().Add(sm.conf.BatchTimeout)
-			heap.Push(&pq, &priorityqueue.Item{
-				Value:    nextItem,
-				Priority: nextItem.deadline.UnixNano(),
-			})
-			heap.Init(&pq)
+			addBatchControlToQueue(nextItem, time.Now().Add(sm.conf.BatchTimeout))
+			go func() {
+				transport.batchMU.Lock()
+				if len(transport.batchBytes) > 0 {
+					sm.FlushBatch(nextItem.connKey, transport)
+				}
+				transport.batchMU.Unlock()
+			}()
 			// sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
 		case flushTime := <-transport.batchFlush:
-			// sm.logger.Infof("batch to %s was flushed while wating for trigger", nextItem.connKey)
-			nextItem.deadline = flushTime.Add(sm.conf.BatchTimeout) // TODO review this
-			heap.Push(&pq, &priorityqueue.Item{
-				Value:    nextItem,
-				Priority: nextItem.deadline.UnixNano(),
-			})
-			heap.Init(&pq)
+			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
+			if !stillActive {
+				// sm.logger.Infof("batch control deleted: %s", nextItem.connKey)
+				break
+			}
+			addBatchControlToQueue(nextItem, flushTime.Add(sm.conf.BatchTimeout))
 			// sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
 		}
 		t.Stop()
@@ -520,7 +510,6 @@ func (sm *babelStreamManager) SendMessage(
 }
 
 func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outboundTransport) errors.Error {
-	sm.logger.Infof("added message to batch to %s successfully", outboundStream.targetPeer.String())
 	outboundStream.connMU.Lock()
 	err := outboundStream.conn.WriteFrame(outboundStream.batchBytes)
 	if err != nil {
