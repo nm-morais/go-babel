@@ -111,7 +111,7 @@ func (sm *babelStreamManager) flushBatchesPeriodic() {
 	pq := priorityqueue.PriorityQueue{}
 
 	addBatchControlToQueue := func(batchControl *outboundTransportBatchControl, nextTrigger time.Time) {
-		sm.logger.Infof("Adding batch control %s to queue", batchControl.connKey)
+		// sm.logger.Infof("Adding batch control %s to queue", batchControl.connKey)
 		batchControl.deadline = nextTrigger
 		pqItem := &priorityqueue.Item{
 			Value:    batchControl,
@@ -126,6 +126,7 @@ outer:
 		if len(pq) == 0 {
 			// sm.logger.Info("No out connections, waiting for new connection")
 			newBatchControl := <-sm.addBatchControlChan
+			sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
 			addBatchControlToQueue(newBatchControl, time.Now().Add(sm.conf.BatchTimeout))
 		}
 
@@ -151,14 +152,13 @@ outer:
 		// sm.logger.Infof("Waiting %+v for next deadline...", time.Until(nextItem.deadline))
 		select {
 		case newBatchControl := <-sm.addBatchControlChan:
-			// sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
+			sm.logger.Infof("Adding new batch control to : %s", newBatchControl.connKey)
 			addBatchControlToQueue(newBatchControl, time.Now().Add(sm.conf.BatchTimeout))
 			addBatchControlToQueue(nextItem, nextItem.deadline)
 		case <-t.C:
 			// sm.logger.Infof("Batch emission to %s triggered", nextItem.connKey)
 			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
-				// sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
 				break
 			}
 			addBatchControlToQueue(nextItem, time.Now().Add(sm.conf.BatchTimeout))
@@ -173,13 +173,12 @@ outer:
 		case flushTime := <-transport.batchFlush:
 			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
-				// sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
+				sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
 				break
 			}
 			addBatchControlToQueue(nextItem, flushTime.Add(sm.conf.BatchTimeout))
 			// sm.logger.Infof("Re-added batch control to : %s", nextItem.connKey)
-		case <-time.After(2 * sm.conf.BatchTimeout):
-			// panic("batch control thread is stuck")
+		case <-transport.Finished:
 		}
 		t.Stop()
 	}
@@ -562,6 +561,26 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 		outboundStream := outboundStreamInt.(*outboundTransport)
 		sm.closeConn(outboundStream.conn)
 		sm.logStreamManagerState()
+		outboundStream.connMU.Lock()
+		select {
+		case <-outboundStream.Finished:
+		default:
+			close(outboundStream.Finished)
+		}
+		outboundStream.connMU.Unlock()
+		outboundStream.batchMU.Lock()
+		for _, msgGeneric := range outboundStream.batchMessages {
+			sm.babel.MessageDeliveryErr(msgGeneric.originProto,
+				msgGeneric.msg,
+				outboundStream.targetPeer,
+				errors.NonFatalError(500, "disconnected from peer meanwhile", streamManagerCaller))
+		}
+		outboundStream.batchBytes = make([]byte, 0)
+		outboundStream.batchMessages = make([]struct {
+			originProto uint16
+			msg         message.Message
+		}, 0)
+		outboundStream.batchMU.Unlock()
 	}
 }
 
