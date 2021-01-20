@@ -422,8 +422,8 @@ func (nm *NodeWatcherImpl) start() {
 }
 
 func (nm *NodeWatcherImpl) startUDPServer() {
+	msgBuf := make([]byte, 200)
 	for {
-		msgBuf := make([]byte, 2048)
 		n, _, rErr := nm.udpConn.ReadFromUDP(msgBuf)
 		if rErr != nil {
 			nm.logger.Warn(rErr)
@@ -621,8 +621,10 @@ LOOP:
 		if nm.conditions.Len() > 0 {
 			nextItem = heap.Pop(&nm.conditions).(*priorityqueue.Item)
 			waitTime = time.Until(time.Unix(0, nextItem.Priority))
+			nextItemTimer.Stop()
 			nextItemTimer = time.NewTimer(waitTime)
 		}
+
 		select {
 		case newItem := <-nm.addCondChan:
 			// nm.logger.Infof("Received add condition signal...")
@@ -671,35 +673,36 @@ LOOP:
 		case <-nextItemTimer.C:
 			cond := nextItem.Value.(nodeWatcher.Condition)
 			nodeInfoInt, ok := nm.watching.Load(cond.Peer.String())
-			if ok { // remove all conditions from unwatched nodes
-				nodeInfo := nodeInfoInt.(nodeWatchingValue)
-				select {
-				case <-nodeInfo.enoughSamples:
-					if cond.CondFunc(nodeInfo) {
-						nm.logger.Infof("Condition trigger: %+v", *nextItem)
-						go nm.babel.SendNotification(cond.Notification)
-						if cond.Repeatable {
-							if cond.EnableGracePeriod {
-								nextItem.Priority = time.Now().Add(cond.GracePeriod).UnixNano()
-								heap.Push(&nm.conditions, nextItem)
-								continue LOOP
-							}
-							nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
+			if !ok { // remove all conditions from unwatched nodes
+				break
+			}
+
+			nodeInfo := nodeInfoInt.(nodeWatchingValue)
+			select {
+			case <-nodeInfo.enoughSamples:
+				if cond.CondFunc(nodeInfo) {
+					nm.logger.Infof("Condition trigger: %+v", *nextItem)
+					go nm.babel.SendNotification(cond.Notification)
+					if cond.Repeatable {
+						if cond.EnableGracePeriod {
+							nextItem.Priority = time.Now().Add(cond.GracePeriod).UnixNano()
 							heap.Push(&nm.conditions, nextItem)
-							continue LOOP
+							break
 						}
-					} else {
 						nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
 						heap.Push(&nm.conditions, nextItem)
+						break
 					}
-				default:
+				} else {
 					nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
 					heap.Push(&nm.conditions, nextItem)
 				}
-			} else {
-				nm.logger.Infof("Condition Node not watched %+v", *nextItem)
+			default:
+				nextItem.Priority = time.Now().Add(cond.EvalConditionTickDuration).UnixNano()
+				heap.Push(&nm.conditions, nextItem)
 			}
 		}
+		nextItemTimer.Stop()
 		// nm.conditions.LogEntries(nm.logger)
 	}
 }

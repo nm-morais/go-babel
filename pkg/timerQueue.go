@@ -97,7 +97,6 @@ func (tq *timerQueueImpl) Logger() *logrus.Logger {
 
 func (tq *timerQueueImpl) start() {
 
-LOOP:
 	for {
 		// tq.logger.Infof("timer queue loop")
 
@@ -118,13 +117,13 @@ LOOP:
 			// tq.logger.Infof("Received cancel timer signal...")
 			if nextItem == nil {
 				req.removed <- -1
-				continue LOOP
+				break
 			}
 
 			if req.key == nextItem.Key {
 				req.removed <- req.key
 				// tq.logger.Infof("Removed timer %d successfully", req.key)
-				continue LOOP
+				break
 			} else {
 				heap.Push(&tq.pq, nextItem)
 			}
@@ -152,5 +151,6 @@ LOOP:
 			tq.babel.DeliverTimer(value.timer, value.protoID)
 			//tq.pq.LogEntries(tq.logger)
 		}
+		currTimer.Stop()
 	}
 }

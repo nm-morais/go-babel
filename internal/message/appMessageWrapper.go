@@ -17,13 +17,13 @@ type AppMessageWrapper struct {
 }
 
 func NewAppMessageWrapper(
-	mId message.ID,
+	mID message.ID,
 	sourceProto protocol.ID,
 	destProto protocol.ID,
 	wrappedMsgBytes []byte,
 ) message.Message {
 	return &AppMessageWrapper{
-		MessageID:       mId,
+		MessageID:       mID,
 		SourceProto:     sourceProto,
 		DestProto:       destProto,
 		WrappedMsgBytes: wrappedMsgBytes,
