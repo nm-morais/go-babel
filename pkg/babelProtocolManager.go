@@ -31,14 +31,11 @@ import (
 const ProtoManagerCaller = "ProtoManager"
 
 type Config struct {
-	// Silent represents wether the logger outputs to stdout
-	Silent           bool
-	Cpuprofile       bool
-	Memprofile       bool
-	LogFolder        string
-	HandshakeTimeout time.Duration
-	SmConf           StreamManagerConf
-	Peer             peer.Peer
+	Silent           bool              // Silent represents wether the logger outputs to stdout
+	LogFolder        string            // Path to the logs folder
+	HandshakeTimeout time.Duration     // time to wait for the handshake process to a peer
+	SmConf           StreamManagerConf // configurations for the networking layer
+	Peer             peer.Peer         // the advertised address in the handshake process
 }
 
 type protocolValueType = internalProto.WrapperProtocol

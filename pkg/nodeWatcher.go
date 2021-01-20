@@ -429,7 +429,7 @@ func (nm *NodeWatcherImpl) startUDPServer() {
 			nm.logger.Warn(rErr)
 			continue
 		}
-		go nm.handleHBMessageUDP(msgBuf[:n])
+		nm.handleHBMessageUDP(msgBuf[:n])
 	}
 }
 
