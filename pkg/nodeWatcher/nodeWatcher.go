@@ -14,6 +14,7 @@ import (
 type ConditionFunc = func(NodeInfo) bool
 
 type Condition struct {
+	ConditionID               string
 	Peer                      peer.Peer
 	EvalConditionTickDuration time.Duration
 	CondFunc                  ConditionFunc
@@ -22,6 +23,10 @@ type Condition struct {
 	Repeatable                bool
 	EnableGracePeriod         bool
 	GracePeriod               time.Duration
+}
+
+func (c Condition) ID() string {
+	return c.ConditionID
 }
 
 type NodeInfo interface {
@@ -36,7 +41,7 @@ type NodeWatcher interface {
 	Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error
 	GetNodeInfo(peer peer.Peer) (NodeInfo, errors.Error)
 	GetNodeInfoWithDeadline(peer peer.Peer, deadline time.Time) (NodeInfo, errors.Error)
-	NotifyOnCondition(c Condition) (int, errors.Error)
-	CancelCond(condID int) errors.Error
+	NotifyOnCondition(c Condition) (string, errors.Error)
+	CancelCond(condID string) errors.Error
 	Logger() *logrus.Logger
 }

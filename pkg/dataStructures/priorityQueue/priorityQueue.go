@@ -9,7 +9,7 @@ import (
 
 type Item struct {
 	Value    interface{} // The value of the item; arbitrary.
-	Key      int
+	Key      string
 	Priority int64 // The priority of the item in the queue.
 	Index    int   // The index of the item in the heap.
 }
