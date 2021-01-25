@@ -374,6 +374,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		case net.Conn:
 			frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
 			herr := sm.sendHandshakeMessage(frameBasedConn, dialingProto, PermanentTunnel)
+
 			if herr != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), herr)
 				defer sm.closeConn(frameBasedConn)
@@ -382,6 +383,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 				sm.outboundTransports.Delete(k)
 				return
 			}
+
 			_, err := sm.waitForHandshakeMessage(frameBasedConn)
 			if err != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Reason())
@@ -413,7 +415,6 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		default:
 			sm.logger.Panic("Unsupported conn type")
 		}
-
 	}()
 	return nil
 }

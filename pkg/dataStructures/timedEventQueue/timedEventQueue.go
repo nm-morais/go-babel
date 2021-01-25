@@ -2,7 +2,6 @@ package timedEventQueue
 
 import (
 	"container/heap"
-	"math"
 	"time"
 
 	priorityqueue "github.com/nm-morais/go-babel/pkg/dataStructures/priorityQueue"
@@ -39,8 +38,8 @@ type timedEventQueue struct {
 func NewTimedEventQueue(logger *logrus.Logger) TimedEventQueue {
 	tq := &timedEventQueue{
 		pq:                   &priorityqueue.PriorityQueue{},
-		addTimedEventChan:    make(chan addItemReq, 5),
-		removeTimedEventChan: make(chan removeItemReq, 5),
+		addTimedEventChan:    make(chan addItemReq),
+		removeTimedEventChan: make(chan removeItemReq),
 		logger:               logger,
 	}
 	go tq.run()
@@ -89,68 +88,55 @@ func (tq *timedEventQueue) run() {
 	for {
 		var waitTime time.Duration
 		var nextItem *priorityqueue.Item
-		var nextItemTimer = time.NewTimer(math.MaxInt64)
 
-		if tq.pq.Len() > 0 {
-			nextItem = heap.Pop(tq.pq).(*priorityqueue.Item)
-			waitTime = time.Until(time.Unix(0, nextItem.Priority))
-			nextItemTimer.Stop()
-			nextItemTimer = time.NewTimer(waitTime)
+		if tq.pq.Len() == 0 {
+			select {
+			case newItem := <-tq.addTimedEventChan:
+				addNew(newItem.item, newItem.deadline)
+				tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
+			case req := <-tq.removeTimedEventChan:
+				req.respChan <- true
+			}
+			continue
 		}
+
+		nextItem = heap.Pop(tq.pq).(*priorityqueue.Item)
+		waitTime = time.Until(time.Unix(0, nextItem.Priority))
+		nextItemTimer := time.NewTimer(waitTime)
 
 		select {
 		case newItem := <-tq.addTimedEventChan:
+			tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
 			addNew(newItem.item, newItem.deadline)
 			reAdd(nextItem)
-		case toRemove := <-tq.removeTimedEventChan:
-			tq.logger.Infof("removing item: %s", toRemove.key)
-
-			if nextItem != nil {
-				if toRemove.key == nextItem.Key {
-					tq.logger.Infof("Removed item %d successfully", toRemove.key)
-					toRemove.respChan <- true
-
-					goto finish
-				}
-				reAdd(nextItem)
-			}
-
-			for idx, item := range *tq.pq {
-				if item != nil {
-					if toRemove.key == item.Key {
-						heap.Remove(tq.pq, idx)
-						heap.Init(tq.pq)
-						toRemove.respChan <- true
-
-						goto finish
-					}
-				}
-			}
-
 		case req := <-tq.removeTimedEventChan:
 			tq.logger.Info("Received cancel item signal...")
+
 			if nextItem != nil {
 				if req.key == nextItem.Key {
-					tq.logger.Infof("Removed item %d successfully", req.key)
+					tq.logger.Infof("Removed item %s successfully", req.key)
 					req.respChan <- true
 
 					goto finish
 				}
 				reAdd(nextItem)
 			}
-			// nm.logger.Infof("Canceling timer with ID %d", condId)
+
 			for idx, entry := range *tq.pq {
-				if entry.Key == req.key {
-					tq.logger.Infof("Removed item %d successfully", req.key)
-					heap.Remove(tq.pq, idx)
-					heap.Init(tq.pq)
-					req.respChan <- true
-					goto finish
+				if entry.Key != req.key {
+					continue
 				}
+
+				heap.Remove(tq.pq, idx)
+				heap.Init(tq.pq)
+				tq.logger.Infof("Removed item %s successfully", req.key)
+				req.respChan <- true
+
+				goto finish
 			}
+
 			req.respChan <- false
-			tq.logger.Warnf("Removing item %d failure: not found", req.key)
-			// tq.pq.LogEntries(tq.logger)
+			tq.logger.Warnf("Removing item %s failure: not found", req.key)
 
 		case <-nextItemTimer.C:
 			item := nextItem.Value.(Item)

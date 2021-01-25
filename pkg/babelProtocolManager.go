@@ -66,7 +66,7 @@ func NewProtoManager(configs Config) *protoManager {
 		logger:               logs.NewLogger(ProtoManagerCaller),
 	}
 	p.tq = NewTimerQueue(p)
-	p.streamManager = NewStreamManager(p, p.config.SmConf)
+	p.streamManager = NewStreamManager(p, configs.SmConf)
 	return p
 }
 

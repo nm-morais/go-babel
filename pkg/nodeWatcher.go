@@ -373,7 +373,7 @@ func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.E
 	}
 	close(watchedPeer.(nodeWatchingValue).unwatch)
 	nm.watching.Delete(peer.String())
-	nm.hbTeq.Remove(peer.String())
+	_ = nm.hbTeq.Remove(peer.String())
 	return nil
 }
 
