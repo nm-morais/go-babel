@@ -104,8 +104,14 @@ func (tq *timedEventQueue) run() {
 			reAdd(nextItem)
 		case toRemove := <-tq.removeTimedEventChan:
 			tq.logger.Infof("removing item: %s", toRemove.key)
-			if nextItem != nil && nextItem.Key == toRemove.key {
-				goto finish
+
+			if nextItem != nil {
+				if toRemove.key == nextItem.Key {
+					tq.logger.Infof("Removed item %d successfully", toRemove.key)
+					toRemove.respChan <- true
+					goto finish
+				}
+				reAdd(nextItem)
 			}
 
 			for idx, item := range *tq.pq {
@@ -113,18 +119,22 @@ func (tq *timedEventQueue) run() {
 					if toRemove.key == item.Key {
 						heap.Remove(tq.pq, idx)
 						heap.Init(tq.pq)
+						toRemove.respChan <- true
+						goto finish
 					}
 				}
 			}
-			reAdd(nextItem)
+
 		case req := <-tq.removeTimedEventChan:
 			tq.logger.Info("Received cancel item signal...")
-			if req.key == nextItem.Key {
-				tq.logger.Infof("Removed itemition %d successfully", req.key)
-				req.respChan <- true
-				goto finish
+			if nextItem != nil {
+				if req.key == nextItem.Key {
+					tq.logger.Infof("Removed item %d successfully", req.key)
+					req.respChan <- true
+					goto finish
+				}
+				reAdd(nextItem)
 			}
-			reAdd(nextItem)
 			// nm.logger.Infof("Canceling timer with ID %d", condId)
 			for idx, entry := range *tq.pq {
 				if entry.Key == req.key {
