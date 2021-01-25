@@ -293,8 +293,8 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 
 	newNodeInfo := &NodeInfoImpl{
 		peerConn:           nil,
-		enoughTestMessages: nil,
-		enoughSamples:      nil,
+		enoughTestMessages: make(chan interface{}),
+		enoughSamples:      make(chan interface{}),
 		nrMessagesReceived: &nrMessages,
 		err:                make(chan interface{}),
 		unwatch:            make(chan interface{}),
@@ -303,6 +303,8 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 		detector:           detector,
 		nw:                 nm,
 	}
+	close(newNodeInfo.enoughSamples)
+	close(newNodeInfo.enoughTestMessages)
 	newNodeInfo.latencyCalc.AddMeasurement(latency)
 	nm.watching.Store(p.String(), newNodeInfo)
 	go nm.dialAndWatch(issuerProto, newNodeInfo)
@@ -608,11 +610,19 @@ func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage, nodeIn
 	nodeInfo.LatencyCalc().AddMeasurement(timeTaken)
 
 	if nodeInfo.enoughSamples != nil && currMeasurement == nm.conf.MinSamplesLatencyEstimate {
-		close(nodeInfo.enoughSamples)
+		select {
+		case <-nodeInfo.enoughSamples:
+		default:
+			close(nodeInfo.enoughSamples)
+		}
 	}
 
-	if nodeInfo.enoughTestMessages != nil && currMeasurement == nm.conf.NrTestMessagesToReceive {
-		close(nodeInfo.enoughTestMessages)
+	if currMeasurement == nm.conf.NrTestMessagesToReceive {
+		select {
+		case <-nodeInfo.enoughTestMessages:
+		default:
+			close(nodeInfo.enoughTestMessages)
+		}
 	}
 }
 
