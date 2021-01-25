@@ -50,8 +50,8 @@ func (n *NodeInfoImpl) OnTrigger() (bool, *time.Time) {
 	switch conn := n.peerConn.(type) {
 	case net.PacketConn:
 		rAddrUdp := &net.UDPAddr{IP: n.Peer().IP(), Port: int(n.Peer().AnalyticsPort())}
-		n.nw.logger.Infof("sending hb message:%+v", toSend)
-		n.nw.logger.Infof("Sent HB to %s via UDP", n.peer.String())
+		// n.nw.logger.Infof("sending hb message:%+v", toSend)
+		// n.nw.logger.Infof("Sent HB to %s via UDP", n.peer.String())
 		_, err := n.nw.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(toSend), rAddrUdp)
 		if err != nil {
 			n.nw.logger.Panicf("err %s in udp conn", err.Error())

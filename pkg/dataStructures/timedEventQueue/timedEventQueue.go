@@ -109,6 +109,7 @@ func (tq *timedEventQueue) run() {
 				if toRemove.key == nextItem.Key {
 					tq.logger.Infof("Removed item %d successfully", toRemove.key)
 					toRemove.respChan <- true
+
 					goto finish
 				}
 				reAdd(nextItem)
@@ -120,6 +121,7 @@ func (tq *timedEventQueue) run() {
 						heap.Remove(tq.pq, idx)
 						heap.Init(tq.pq)
 						toRemove.respChan <- true
+
 						goto finish
 					}
 				}
@@ -131,6 +133,7 @@ func (tq *timedEventQueue) run() {
 				if req.key == nextItem.Key {
 					tq.logger.Infof("Removed item %d successfully", req.key)
 					req.respChan <- true
+
 					goto finish
 				}
 				reAdd(nextItem)
@@ -156,6 +159,7 @@ func (tq *timedEventQueue) run() {
 				reAdd(nextItem)
 			}
 		}
+
 	finish:
 		nextItemTimer.Stop()
 	}
