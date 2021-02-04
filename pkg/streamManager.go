@@ -560,9 +560,9 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 	outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
 	if loaded {
 		outboundStream := outboundStreamInt.(*outboundTransport)
+		outboundStream.connMU.Lock()
 		sm.closeConn(outboundStream.conn)
 		sm.logStreamManagerState()
-		outboundStream.connMU.Lock()
 		select {
 		case <-outboundStream.Finished:
 		default:

@@ -9,13 +9,13 @@ import (
 const PingTimerID = 1001
 
 type PingTimer struct {
-	deadline time.Time
+	duration time.Duration
 }
 
 func (p PingTimer) ID() timer.ID {
 	return PingTimerID
 }
 
-func (p PingTimer) Deadline() time.Time {
-	return p.deadline
+func (p PingTimer) Duration() time.Duration {
+	return p.duration
 }

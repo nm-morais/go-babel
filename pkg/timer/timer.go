@@ -6,5 +6,5 @@ type ID = uint16
 
 type Timer interface {
 	ID() ID
-	Deadline() time.Time
+	Duration() time.Duration
 }

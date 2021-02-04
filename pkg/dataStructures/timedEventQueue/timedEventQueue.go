@@ -93,7 +93,7 @@ func (tq *timedEventQueue) run() {
 			select {
 			case newItem := <-tq.addTimedEventChan:
 				addNew(newItem.item, newItem.deadline)
-				tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
+				// tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
 			case req := <-tq.removeTimedEventChan:
 				req.respChan <- true
 			}
@@ -106,15 +106,15 @@ func (tq *timedEventQueue) run() {
 
 		select {
 		case newItem := <-tq.addTimedEventChan:
-			tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
+			// tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
 			addNew(newItem.item, newItem.deadline)
 			reAdd(nextItem)
 		case req := <-tq.removeTimedEventChan:
-			tq.logger.Info("Received cancel item signal...")
+			// tq.logger.Info("Received cancel item signal...")
 
 			if nextItem != nil {
 				if req.key == nextItem.Key {
-					tq.logger.Infof("Removed item %s successfully", req.key)
+					// tq.logger.Infof("Removed item %s successfully", req.key)
 					req.respChan <- true
 
 					goto finish
@@ -129,14 +129,14 @@ func (tq *timedEventQueue) run() {
 
 				heap.Remove(tq.pq, idx)
 				heap.Init(tq.pq)
-				tq.logger.Infof("Removed item %s successfully", req.key)
+				// tq.logger.Infof("Removed item %s successfully", req.key)
 				req.respChan <- true
 
 				goto finish
 			}
 
 			req.respChan <- false
-			tq.logger.Warnf("Removing item %s failure: not found", req.key)
+			// tq.logger.Warnf("Removing item %s failure: not found", req.key)
 
 		case <-nextItemTimer.C:
 			item := nextItem.Value.(Item)

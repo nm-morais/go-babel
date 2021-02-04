@@ -276,7 +276,7 @@ func (p *protoManager) MessageDeliveryErr(sendingProto protocol.ID, msg message.
 }
 
 func (p *protoManager) Disconnect(source protocol.ID, toDc peer.Peer) {
-	p.streamManager.Disconnect(source, toDc)
+	go p.streamManager.Disconnect(source, toDc)
 }
 
 func (p *protoManager) SelfPeer() peer.Peer {
@@ -395,6 +395,10 @@ func (p *protoManager) CancelTimer(timerID int) errors.Error {
 
 func (p *protoManager) RegisterTimer(origin protocol.ID, timer timer.Timer) int {
 	return p.tq.AddTimer(timer, origin)
+}
+
+func (p *protoManager) RegisterPeriodicTimer(origin protocol.ID, timer timer.Timer) int {
+	return p.tq.AddPeriodicTimer(timer, origin)
 }
 
 func (p *protoManager) StartAsync() {

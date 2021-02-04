@@ -9,13 +9,13 @@ import (
 const ShuffleTimerID = 2001
 
 type ShuffleTimer struct {
-	deadline time.Time
+	duration time.Duration
 }
 
 func (ShuffleTimer) ID() timer.ID {
 	return ShuffleTimerID
 }
 
-func (s ShuffleTimer) Deadline() time.Time {
-	return s.deadline
+func (s ShuffleTimer) Duration() time.Duration {
+	return s.duration
 }

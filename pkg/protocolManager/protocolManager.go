@@ -58,6 +58,7 @@ type ProtocolManager interface {
 
 	CancelTimer(timerID int) errors.Error
 	RegisterTimer(origin protocol.ID, timer timer.Timer) int
+	RegisterPeriodicTimer(origin protocol.ID, timer timer.Timer) int
 
 	SelfPeer() peer.Peer
 

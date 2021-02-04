@@ -17,6 +17,7 @@ import (
 const timerQueueCaller = "timerQueue"
 
 type TimerQueue interface {
+	AddPeriodicTimer(timer timer.Timer, protocolID protocol.ID) int
 	AddTimer(timer timer.Timer, protocolID protocol.ID) int
 	CancelTimer(int) errors.Error
 	Logger() *logrus.Logger
@@ -39,14 +40,15 @@ func NewTimerQueue(protoManager protocolManager.ProtocolManager) TimerQueue {
 }
 
 type timerWrapper struct {
-	id      int
-	protoID protocol.ID
-	timer   timer.Timer
-	babel   protocolManager.ProtocolManager
+	periodic bool
+	id       int
+	protoID  protocol.ID
+	timer    timer.Timer
+	babel    protocolManager.ProtocolManager
 }
 
 func (tw *timerWrapper) Periodicity() time.Duration {
-	return time.Until(tw.timer.Deadline())
+	return tw.timer.Duration()
 }
 
 func (tw *timerWrapper) ID() string {
@@ -55,18 +57,38 @@ func (tw *timerWrapper) ID() string {
 
 func (tw *timerWrapper) OnTrigger() (bool, *time.Time) {
 	tw.babel.DeliverTimer(tw.timer, tw.protoID)
-	return false, nil
+	if !tw.periodic {
+		return false, nil
+	}
+	nextTrigger := time.Now().Add(tw.Periodicity())
+	return true, &nextTrigger
+}
+
+func (tq *timerQueueImpl) AddPeriodicTimer(timer timer.Timer, protocolId protocol.ID) int {
+	newTimerID := rand.Int()
+	timerWrapper := &timerWrapper{
+		periodic: true,
+		id:       newTimerID,
+		protoID:  protocolId,
+		timer:    timer,
+		babel:    tq.babel,
+	}
+	nextTrigger := time.Now().Add(timerWrapper.Periodicity())
+	tq.teq.Add(timerWrapper, nextTrigger)
+	return newTimerID
 }
 
 func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) int {
 	newTimerID := rand.Int()
 	timerWrapper := &timerWrapper{
-		id:      newTimerID,
-		protoID: protocolId,
-		timer:   timer,
-		babel:   tq.babel,
+		periodic: false,
+		id:       newTimerID,
+		protoID:  protocolId,
+		timer:    timer,
+		babel:    tq.babel,
 	}
-	tq.teq.Add(timerWrapper, timer.Deadline())
+	nextTrigger := time.Now().Add(timerWrapper.Periodicity())
+	tq.teq.Add(timerWrapper, nextTrigger)
 	return newTimerID
 }
 

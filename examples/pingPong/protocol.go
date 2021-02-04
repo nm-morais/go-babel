@@ -165,14 +165,13 @@ func (m *PingPongProtocol) handlePingTimer(timer timer.Timer) {
 		}
 	}
 
-	m.babel.RegisterTimer(protoID, PingTimer{deadline: time.Now().Add(1 * time.Second)})
 }
 
 func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
 	m.logger.Infof("Connection established to peer %+v", peer.String())
 	if sourceProto == protoID {
 		m.activePeers[peer.String()] = peer
-		m.babel.RegisterTimer(protoID, PingTimer{deadline: time.Now().Add(0 * time.Second)})
+		m.babel.RegisterPeriodicTimer(protoID, PingTimer{duration: 3 * time.Second})
 		return true
 	}
 	return false
