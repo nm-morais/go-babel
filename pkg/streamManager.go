@@ -374,10 +374,10 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		case net.Conn:
 			frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
 			herr := sm.sendHandshakeMessage(frameBasedConn, dialingProto, PermanentTunnel)
-
+			newOutboundTransport.conn = frameBasedConn
 			if herr != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), herr)
-				defer sm.closeConn(frameBasedConn)
+				sm.closeConn(frameBasedConn)
 				close(newOutboundTransport.DialErr)
 				sm.babel.DialError(dialingProto, toDial)
 				sm.outboundTransports.Delete(k)
@@ -387,7 +387,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 			_, err := sm.waitForHandshakeMessage(frameBasedConn)
 			if err != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), err.Reason())
-				defer sm.closeConn(frameBasedConn)
+				sm.closeConn(frameBasedConn)
 				close(newOutboundTransport.DialErr)
 				sm.babel.DialError(dialingProto, toDial)
 				sm.outboundTransports.Delete(k)
@@ -396,12 +396,11 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 
 			if !sm.babel.DialSuccess(dialingProto, toDial) {
 				sm.logger.Error("protocol did not accept conn")
-				defer sm.closeConn(frameBasedConn)
+				sm.closeConn(frameBasedConn)
 				close(newOutboundTransport.DialErr)
 				sm.outboundTransports.Delete(k)
 				return
 			}
-			newOutboundTransport.conn = frameBasedConn
 			close(newOutboundTransport.Dialed)
 			sm.logger.Warnf("Dialed %s successfully", k)
 			sm.addBatchControlChan <- &struct {
@@ -529,7 +528,7 @@ func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outbo
 		}
 		outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(streamKey)
 		if loaded {
-			outboundStream := outboundStreamInt.(*outboundTransport)
+			outboundStream = outboundStreamInt.(*outboundTransport)
 			sm.closeConn(outboundStream.conn)
 			sm.babel.OutTransportFailure(outboundStream.originProto, outboundStream.targetPeer)
 		}
@@ -599,7 +598,6 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 				sm.logger.Error(err)
 			}
 			sm.closeConn(mr)
-			mr = nil
 			sm.inboundTransports.Delete(newPeer.String())
 			return
 		}
