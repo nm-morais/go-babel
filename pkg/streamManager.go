@@ -70,7 +70,7 @@ type outboundTransport struct {
 	Finished chan interface{}
 
 	conn   messageIO.FrameConn
-	connMU sync.Mutex
+	connMU *sync.Mutex
 
 	targetPeer  peer.Peer
 	originProto protocol.ID
@@ -340,6 +340,9 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 
 func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial peer.Peer, addr net.Addr) errors.Error {
 	k := getKeyForConn(dialingProto, toDial)
+	connMu := &sync.Mutex{}
+	connMu.Lock()
+	defer connMu.Unlock()
 	newOutboundTransportGeneric, loaded := sm.outboundTransports.LoadOrStore(k, &outboundTransport{
 		Addr:        addr,
 		Dialed:      make(chan interface{}),
@@ -347,7 +350,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		Finished:    make(chan interface{}),
 		DialErr:     make(chan interface{}),
 		conn:        nil,
-		connMU:      sync.Mutex{},
+		connMU:      connMu,
 		batchMU:     sync.Mutex{},
 		batchMessages: make([]struct {
 			originProto uint16
