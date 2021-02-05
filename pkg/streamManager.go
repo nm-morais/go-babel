@@ -562,28 +562,33 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 	outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
 	if loaded {
 		outboundStream := outboundStreamInt.(*outboundTransport)
-		outboundStream.connMU.Lock()
-		sm.closeConn(outboundStream.conn)
-		sm.logStreamManagerState()
 		select {
+		case <-outboundStream.DialErr:
 		case <-outboundStream.Finished:
-		default:
-			close(outboundStream.Finished)
+		case <-outboundStream.Dialed:
+			outboundStream.connMU.Lock()
+			sm.closeConn(outboundStream.conn)
+			sm.logStreamManagerState()
+			select {
+			case <-outboundStream.Finished:
+			default:
+				close(outboundStream.Finished)
+			}
+			outboundStream.connMU.Unlock()
+			outboundStream.batchMU.Lock()
+			for _, msgGeneric := range outboundStream.batchMessages {
+				sm.babel.MessageDeliveryErr(msgGeneric.originProto,
+					msgGeneric.msg,
+					outboundStream.targetPeer,
+					errors.NonFatalError(500, "disconnected from peer meanwhile", streamManagerCaller))
+			}
+			outboundStream.batchBytes = make([]byte, 0)
+			outboundStream.batchMessages = make([]struct {
+				originProto uint16
+				msg         message.Message
+			}, 0)
+			outboundStream.batchMU.Unlock()
 		}
-		outboundStream.connMU.Unlock()
-		outboundStream.batchMU.Lock()
-		for _, msgGeneric := range outboundStream.batchMessages {
-			sm.babel.MessageDeliveryErr(msgGeneric.originProto,
-				msgGeneric.msg,
-				outboundStream.targetPeer,
-				errors.NonFatalError(500, "disconnected from peer meanwhile", streamManagerCaller))
-		}
-		outboundStream.batchBytes = make([]byte, 0)
-		outboundStream.batchMessages = make([]struct {
-			originProto uint16
-			msg         message.Message
-		}, 0)
-		outboundStream.batchMU.Unlock()
 	}
 }
 
