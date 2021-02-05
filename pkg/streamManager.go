@@ -133,7 +133,7 @@ outer:
 		nextItem := heap.Pop(&pq).(*priorityqueue.Item).Value.(*outboundTransportBatchControl)
 		transportInt, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 		if !stillActive {
-			sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
+			sm.logger.Infof("batch control to %s exiting...", nextItem.connKey)
 			continue
 		}
 		transport := transportInt.(*outboundTransport)
@@ -173,7 +173,7 @@ outer:
 		case flushTime := <-transport.batchFlush:
 			_, stillActive := sm.outboundTransports.Load(nextItem.connKey)
 			if !stillActive {
-				sm.logger.Warnf("batch control to %s exiting...", nextItem.connKey)
+				sm.logger.Infof("batch control to %s exiting...", nextItem.connKey)
 				break
 			}
 			addBatchControlToQueue(nextItem, flushTime.Add(sm.conf.BatchTimeout))
@@ -342,7 +342,6 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 	k := getKeyForConn(dialingProto, toDial)
 	connMu := &sync.Mutex{}
 	connMu.Lock()
-	defer connMu.Unlock()
 	newOutboundTransportGeneric, loaded := sm.outboundTransports.LoadOrStore(k, &outboundTransport{
 		Addr:        addr,
 		Dialed:      make(chan interface{}),
@@ -365,6 +364,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		return errors.NonFatalError(500, "connection already up", streamManagerCaller)
 	}
 	go func() {
+		defer connMu.Unlock()
 		conn, err := net.DialTimeout(addr.Network(), addr.String(), sm.conf.DialTimeout)
 		if err != nil {
 			sm.logger.Error(err)
@@ -376,7 +376,6 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		switch newStreamTyped := conn.(type) {
 		case net.Conn:
 			frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
-			herr := sm.sendHandshakeMessage(frameBasedConn, dialingProto, PermanentTunnel)
 			newOutboundTransport.conn = frameBasedConn
 			if herr != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), herr)
@@ -405,7 +404,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 				return
 			}
 			close(newOutboundTransport.Dialed)
-			sm.logger.Warnf("Dialed %s successfully", k)
+			sm.logger.Debugf("Dialed %s successfully", k)
 			sm.addBatchControlChan <- &struct {
 				connKey  string
 				deadline time.Time
@@ -588,17 +587,15 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 }
 
 func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer peer.Peer) {
-	sm.logger.Warnf("[ConnectionEvent] : Handling peer stream %s", newPeer.String())
-	defer sm.logger.Warnf("[ConnectionEvent] : Done handling peer stream %s", newPeer.String())
+	sm.logger.Infof("[ConnectionEvent] : Handling peer stream %s", newPeer.String())
+	defer sm.logger.Infof("[ConnectionEvent] : Done handling peer stream %s", newPeer.String())
 
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	for {
 		msgBuf, err := mr.ReadFrame()
 		if err != nil {
-			if err == io.EOF {
-				sm.logger.Warnf("Read routine from %s got %s, exiting cleanly...", newPeer.String(), err)
-			} else {
-				sm.logger.Error(err)
+			if err != io.EOF {
+				sm.logger.Errorf("Read routine from %s got %s:", newPeer.String(), err.Error())
 			}
 			sm.closeConn(mr)
 			sm.inboundTransports.Delete(newPeer.String())
