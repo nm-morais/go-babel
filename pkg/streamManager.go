@@ -323,22 +323,17 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 			close(done)
 
 			sm.udpConn = packetConn
-			msgBytes := make([]byte, MaxUDPMsgSize)
 			for {
-				for i := range msgBytes {
-					msgBytes[i] = 0
-				}
+				msgBytes := make([]byte, MaxUDPMsgSize)
 				n, _, err := packetConn.ReadFrom(msgBytes)
 				if err != nil {
 					sm.logger.Panic(err)
 				}
 				sender := &peer.IPeer{}
-				msgBuf := msgBytes[:n]
-				peerSize := sender.Unmarshal(msgBuf)
-				sm.logger.Info(sender.String())
-				deserialized := deserializer.Deserialize(msgBuf[peerSize:])
+				peerSize := sender.Unmarshal(msgBytes)
+				deserialized := deserializer.Deserialize(msgBytes[peerSize:n])
 				protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
-				// sm.logger.Infof("Got message via UDP: %+v from %s", protoMsg, sender)
+				sm.logger.Infof("Got message via UDP: %+v from %s", protoMsg, sender)
 				appMsg, err := sm.babel.SerializationManager().Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
 				if err != nil {
 					sm.logger.Panicf("Error deserializing message of type %d from node %s", protoMsg.MessageID, sender)
