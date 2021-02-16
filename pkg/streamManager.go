@@ -39,6 +39,10 @@ var (
 	}
 )
 
+const (
+	MaxUDPMsgSize = 65535
+)
+
 type StreamManagerConf struct {
 	BatchMaxSizeBytes int
 	BatchTimeout      time.Duration
@@ -201,14 +205,18 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProto, msgBytes)
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
 		peerBytes := sm.babel.SelfPeer().Marshal()
-		_, wErr := sm.udpConn.WriteToUDP(append(peerBytes, wrappedBytes...), rAddr)
+		bytesToSend := append(peerBytes, wrappedBytes...)
+		if len(bytesToSend) > MaxUDPMsgSize {
+			sm.logger.Panicf("Size message exceeded: (%d/%d)", len(bytesToSend), MaxUDPMsgSize)
+		}
+		_, wErr := sm.udpConn.WriteToUDP(bytesToSend, rAddr)
 		if wErr != nil {
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, wErr.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
 		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
 	case *net.TCPAddr:
-		tcpStream, err := net.Dial(rAddr.Network(), rAddr.String())
+		tcpStream, err := net.DialTimeout(rAddr.Network(), rAddr.String(), sm.conf.DialTimeout)
 		if err != nil {
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, err.Error(), streamManagerCaller)
@@ -312,10 +320,14 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 			if err != nil {
 				sm.logger.Panic(err)
 			}
-			sm.udpConn = packetConn
 			close(done)
+
+			sm.udpConn = packetConn
+			msgBytes := make([]byte, MaxUDPMsgSize)
 			for {
-				msgBytes := make([]byte, 2048)
+				for i := range msgBytes {
+					msgBytes[i] = 0
+				}
 				n, _, err := packetConn.ReadFrom(msgBytes)
 				if err != nil {
 					sm.logger.Panic(err)
@@ -324,11 +336,13 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				msgBuf := msgBytes[:n]
 				peerSize := sender.Unmarshal(msgBuf)
 				sm.logger.Info(sender.String())
-
 				deserialized := deserializer.Deserialize(msgBuf[peerSize:])
 				protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
 				// sm.logger.Infof("Got message via UDP: %+v from %s", protoMsg, sender)
-				appMsg := sm.babel.SerializationManager().Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
+				appMsg, err := sm.babel.SerializationManager().Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
+				if err != nil {
+					sm.logger.Panicf("Error deserializing message of type %d from node %s", protoMsg.MessageID, sender)
+				}
 				sm.babel.DeliverMessage(sender, appMsg, protoMsg.DestProto)
 			}
 		default:
@@ -463,13 +477,13 @@ func (sm *babelStreamManager) SendMessage(
 		sm.babel.MessageDeliveryErr(origin, toSend, destPeer, err)
 		return err
 	case <-outboundStream.Dialed:
-		msgBytes := appMsgSerializer.Serialize(
-			internalMsg.NewAppMessageWrapper(
-				toSend.Type(),
-				origin,
-				destination,
-				sm.babel.SerializationManager().Serialize(toSend),
-			))
+		internalMsgBytes, _ := sm.babel.SerializationManager().Serialize(toSend)
+		msgBytes := appMsgSerializer.Serialize(internalMsg.NewAppMessageWrapper(
+			toSend.Type(),
+			origin,
+			destination,
+			internalMsgBytes,
+		))
 		sizeBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(sizeBytes, uint32(len(msgBytes)))
 		msgBytes = append(sizeBytes, msgBytes...)
@@ -621,7 +635,10 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 
 			msgGeneric := deserializer.Deserialize(msgBuf[i : i+int(msgSize)])
 			msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
-			appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
+			appMsg, err := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
+			if err != nil {
+				sm.logger.Panicf("Got error %s deserializing message of type %d from %s", err.Error(), msgWrapper.MessageID, newPeer)
+			}
 			sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
 			i += int(msgSize)
 		}
@@ -630,7 +647,6 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 
 func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.FrameConn) {
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
-
 	if newPeer.String() == sm.babel.SelfPeer().String() {
 		sm.logger.Panic("Dialing self")
 	}
@@ -643,7 +659,10 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.Fra
 	msgGeneric := deserializer.Deserialize(msgBytes)
 	msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
 	//sm.logger.Info("Done reading from tmp stream")
-	appMsg := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
+	appMsg, err := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
+	if err != nil {
+		sm.logger.Panicf("Got error %s deserializing message of type %d from %s", err.Error(), msgWrapper.MessageID, newPeer)
+	}
 	sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
 	sm.closeConn(c)
 }

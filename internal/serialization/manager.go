@@ -1,10 +1,16 @@
 package serialization
 
 import (
-	"fmt"
+	"errors"
 	"sync"
 
 	"github.com/nm-morais/go-babel/pkg/message"
+)
+
+var (
+	ErrDeserialization = errors.New("Deserialization error")
+	ErrNoSerializer    = errors.New("No serializer for message")
+	ErrNoDeserializer  = errors.New("No deserializer for message")
 )
 
 type Manager struct {
@@ -19,22 +25,6 @@ func NewSerializationManager() *Manager {
 	}
 }
 
-func (m *Manager) GetDeserializer(id message.ID) message.Deserializer {
-	deserializer, ok := m.deserializers.Load(id)
-	if !ok {
-		panic(fmt.Sprintf("No deserializer for messageID: %d", id))
-	}
-	return deserializer.(message.Deserializer)
-}
-
-func (m *Manager) GetSerializer(id message.ID) message.Serializer {
-	serializer, ok := m.serializers.Load(id)
-	if !ok {
-		panic(fmt.Sprintf("No serializer for messageID: %d", id))
-	}
-	return serializer.(message.Serializer)
-}
-
 func (m *Manager) RegisterDeserializer(id message.ID, serializer message.Deserializer) {
 	m.deserializers.Store(id, serializer)
 }
@@ -43,10 +33,20 @@ func (m *Manager) RegisterSerializer(id message.ID, serializer message.Serialize
 	m.serializers.Store(id, serializer)
 }
 
-func (m *Manager) Deserialize(id message.ID, bytes []byte) message.Message {
-	return m.GetDeserializer(id).Deserialize(bytes)
+func (m *Manager) Deserialize(id message.ID, bytes []byte) (message.Message, error) {
+	serializer, ok := m.deserializers.Load(id)
+	if !ok {
+		return nil, ErrNoSerializer
+	}
+	msgBytes := serializer.(message.Deserializer).Deserialize(bytes)
+	return msgBytes, nil
 }
 
-func (m *Manager) Serialize(message message.Message) []byte {
-	return m.GetSerializer(message.Type()).Serialize(message)
+func (m *Manager) Serialize(msg message.Message) ([]byte, error) {
+	serializerGeneric, ok := m.serializers.Load(msg.Type())
+	if !ok {
+		return nil, ErrNoDeserializer
+	}
+	msgBytes := serializerGeneric.(message.Serializer).Serialize(msg)
+	return msgBytes, nil
 }
