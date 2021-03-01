@@ -3,6 +3,7 @@ package pkg
 import (
 	"container/heap"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -57,6 +58,11 @@ type outboundTransportBatchControl = struct {
 type babelStreamManager struct {
 	conf StreamManagerConf
 
+	sentCounterMux     *sync.Mutex
+	receivedCounterMux *sync.Mutex
+	msgCountersSent    map[protocol.ID]int64
+	msgCountersRecvd   map[protocol.ID]int64
+
 	babel              protocolManager.ProtocolManager
 	udpConn            *net.UDPConn
 	outboundTransports *sync.Map
@@ -98,6 +104,10 @@ const streamManagerCaller = "StreamManager"
 func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerConf) *babelStreamManager {
 	sm := &babelStreamManager{
 		conf:                conf,
+		sentCounterMux:      &sync.Mutex{},
+		receivedCounterMux:  &sync.Mutex{},
+		msgCountersSent:     map[uint16]int64{},
+		msgCountersRecvd:    map[uint16]int64{},
 		babel:               babel,
 		udpConn:             &net.UDPConn{},
 		outboundTransports:  &sync.Map{},
@@ -217,7 +227,9 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		if written != len(bytesToSend) {
 			sm.logger.Panicf("Did not send all message bytes: (%d/%d)", written, len(bytesToSend))
 		}
+
 		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
+		sm.addMsgSent(sourceProtoID)
 	case *net.TCPAddr:
 		tcpStream, err := net.DialTimeout(rAddr.Network(), rAddr.String(), sm.conf.DialTimeout)
 		if err != nil {
@@ -242,6 +254,7 @@ func (sm *babelStreamManager) SendMessageSideStream(
 			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
 		}
 		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
+		sm.addMsgSent(sourceProtoID)
 		err = tcpStream.Close()
 		if err != nil {
 			sm.logger.Errorf("Err: %s", err.Error())
@@ -250,6 +263,18 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		log.Panicf("Unknown addr type %s", reflect.TypeOf(rAddr))
 	}
 	return nil
+}
+
+func (sm *babelStreamManager) addMsgSent(proto protocol.ID) {
+	sm.sentCounterMux.Lock()
+	sm.msgCountersSent[proto]++
+	sm.sentCounterMux.Unlock()
+}
+
+func (sm *babelStreamManager) addMsgReceived(proto protocol.ID) {
+	sm.receivedCounterMux.Lock()
+	sm.msgCountersRecvd[proto]++
+	sm.receivedCounterMux.Unlock()
 }
 
 func (sm *babelStreamManager) closeConn(c messageIO.FrameConn) {
@@ -261,6 +286,11 @@ func (sm *babelStreamManager) closeConn(c messageIO.FrameConn) {
 
 func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan interface{} {
 	done := make(chan interface{})
+	go func() {
+		for range time.NewTicker(10 * time.Second).C {
+			sm.logMsgStats()
+		}
+	}()
 	go func() {
 		sm.logger.Infof("Starting listener of type %s", lAddrInt.Network())
 		switch lAddr := lAddrInt.(type) {
@@ -344,6 +374,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 					sm.logger.Panicf("Error %s deserializing message of type %d from node %s", err.Error(), protoMsg.MessageID, sender)
 				}
 				sm.babel.DeliverMessage(sender, appMsg, protoMsg.DestProto)
+				sm.addMsgReceived(protoMsg.DestProto)
 			}
 		default:
 			sm.logger.Panic("cannot listen in such addr")
@@ -526,6 +557,7 @@ func (sm *babelStreamManager) SendMessage(
 		}
 		outboundStream.connMU.Unlock()
 		sm.babel.MessageDelivered(origin, toSend, destPeer)
+		sm.addMsgSent(origin)
 		return nil
 	}
 }
@@ -556,6 +588,7 @@ func (sm *babelStreamManager) FlushBatch(streamKey string, outboundStream *outbo
 	for _, msgGeneric := range outboundStream.batchMessages {
 		// sm.logger.Infof("Message %d of type %s in batch sent to %s", idx, reflect.TypeOf(msgGeneric.msg), outboundStream.targetPeer.String())
 		sm.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, outboundStream.targetPeer)
+		sm.addMsgSent(msgGeneric.originProto)
 	}
 	outboundStream.batchBytes = make([]byte, 0, sm.conf.BatchMaxSizeBytes)
 	outboundStream.batchMessages = make([]struct {
@@ -640,6 +673,7 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 				sm.logger.Panicf("Got error %s deserializing message of type %d from %s", err.Error(), msgWrapper.MessageID, newPeer)
 			}
 			sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
+			sm.addMsgReceived(msgWrapper.DestProto)
 			i += int(msgSize)
 		}
 	}
@@ -664,6 +698,7 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.Fra
 		sm.logger.Panicf("Got error %s deserializing message of type %d from %s", err.Error(), msgWrapper.MessageID, newPeer)
 	}
 	sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
+	sm.addMsgReceived(msgWrapper.DestProto)
 	sm.closeConn(c)
 }
 
@@ -720,4 +755,22 @@ func (sm *babelStreamManager) logStreamManagerState() {
 		},
 	)
 	sm.logger.Info(toLog)
+}
+
+func (sm *babelStreamManager) logMsgStats() {
+	sm.receivedCounterMux.Lock()
+	defer sm.receivedCounterMux.Unlock()
+	toPrint, err := json.Marshal(sm.msgCountersSent)
+	if err != nil {
+		panic(err)
+	}
+	sm.logger.Infof("<messages-sent>:%s", string(toPrint))
+
+	sm.sentCounterMux.Lock()
+	defer sm.sentCounterMux.Unlock()
+	toPrint, err = json.Marshal(sm.msgCountersRecvd)
+	if err != nil {
+		panic(err)
+	}
+	sm.logger.Infof("<messages-received>:%s", string(toPrint))
 }

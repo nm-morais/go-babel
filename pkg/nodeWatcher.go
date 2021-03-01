@@ -195,7 +195,6 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 
 	udpConn, err := net.ListenUDP("udp", listenAddr)
 	if err != nil {
-		panic(err)
 		nm.logger.Panic(err)
 	}
 	nm.udpConn = *udpConn
