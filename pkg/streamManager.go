@@ -209,15 +209,21 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		if len(bytesToSend) > MaxUDPMsgSize {
 			sm.logger.Panicf("Size message exceeded: (%d/%d)", len(bytesToSend), MaxUDPMsgSize)
 		}
-		_, wErr := sm.udpConn.WriteToUDP(bytesToSend, rAddr)
+		written, wErr := sm.udpConn.WriteToUDP(bytesToSend, rAddr)
 		if wErr != nil {
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, wErr.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, wErr.Error(), streamManagerCaller)
+		}
+		if written != len(bytesToSend) {
+			sm.logger.Panicf("Did not send all message bytes: (%d/%d)", written, len(bytesToSend))
 		}
 		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
 	case *net.TCPAddr:
 		tcpStream, err := net.DialTimeout(rAddr.Network(), rAddr.String(), sm.conf.DialTimeout)
 		if err != nil {
+			if err, ok := err.(net.Error); ok && err.Timeout() {
+				sm.logger.Errorf("Got timeout error dialing with dialTimeout=%+v", sm.conf.DialTimeout)
+			}
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, err.Error(), streamManagerCaller)
 		}
@@ -238,7 +244,7 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
 		err = tcpStream.Close()
 		if err != nil {
-			sm.logger.Errorf("Err: %+w", err)
+			sm.logger.Errorf("Err: %s", err.Error())
 		}
 	default:
 		log.Panicf("Unknown addr type %s", reflect.TypeOf(rAddr))
@@ -333,10 +339,9 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				peerSize := sender.Unmarshal(msgBytes)
 				deserialized := deserializer.Deserialize(msgBytes[peerSize:n])
 				protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
-				sm.logger.Infof("Got message via UDP: %+v from %s", protoMsg, sender)
 				appMsg, err := sm.babel.SerializationManager().Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
 				if err != nil {
-					sm.logger.Panicf("Error deserializing message of type %d from node %s", protoMsg.MessageID, sender)
+					sm.logger.Panicf("Error %s deserializing message of type %d from node %s", err.Error(), protoMsg.MessageID, sender)
 				}
 				sm.babel.DeliverMessage(sender, appMsg, protoMsg.DestProto)
 			}
