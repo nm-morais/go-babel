@@ -176,6 +176,7 @@ func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManage
 	logger := logs.NewLogger(nodeWatcherCaller)
 	nm := &NodeWatcherImpl{
 		babel:              babel,
+		selfPeer:           peer.NewPeer(config.AdvertiseListenAddr, babel.SelfPeer().ProtosPort(), uint16(config.ListenPort)),
 		conf:               config,
 		sentCounterMux:     &sync.Mutex{},
 		receivedCounterMux: &sync.Mutex{},
