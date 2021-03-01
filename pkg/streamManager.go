@@ -117,6 +117,11 @@ func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerC
 	}
 	sm.logger.Infof("Starting streamManager with config: %+v", conf)
 	go sm.flushBatchesPeriodic()
+	go func() {
+		for range time.NewTicker(10 * time.Second).C {
+			sm.logMsgStats()
+		}
+	}()
 	return sm
 }
 
@@ -286,11 +291,6 @@ func (sm *babelStreamManager) closeConn(c messageIO.FrameConn) {
 
 func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan interface{} {
 	done := make(chan interface{})
-	go func() {
-		for range time.NewTicker(10 * time.Second).C {
-			sm.logMsgStats()
-		}
-	}()
 	go func() {
 		sm.logger.Infof("Starting listener of type %s", lAddrInt.Network())
 		switch lAddr := lAddrInt.(type) {
@@ -771,9 +771,9 @@ func (sm *babelStreamManager) logMsgStats() {
 		ApplicationalMessagesReceived: sm.msgCountersRecvd,
 	}
 
-	toPrint_json, err := json.Marshal(toPrint)
+	toPrintJSON, err := json.Marshal(toPrint)
 	if err != nil {
 		panic(err)
 	}
-	sm.logger.Infof("<app-messages-stats>:%s", string(toPrint_json))
+	sm.logger.Infof("<app-messages-stats>:%s", string(toPrintJSON))
 }

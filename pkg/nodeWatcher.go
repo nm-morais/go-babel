@@ -57,6 +57,7 @@ func (n *NodeInfoImpl) OnTrigger() (bool, *time.Time) {
 		if err != nil {
 			n.nw.logger.Panicf("err %s in udp conn", err.Error())
 		}
+		n.nw.addMsgSent()
 	case net.Conn:
 		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, conn)
 
@@ -66,6 +67,7 @@ func (n *NodeInfoImpl) OnTrigger() (bool, *time.Time) {
 			close(n.err)
 			return false, nil
 		}
+		n.nw.addMsgSent()
 	}
 	nextTrigger := time.Now().Add(n.nw.conf.HbTickDuration)
 	return true, &nextTrigger
@@ -399,6 +401,7 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 				),
 			), rAddrUdp,
 		)
+		nm.addMsgSent()
 		if err != nil {
 			if nrErrors == 3 {
 				nm.logger.Panic(err)
@@ -430,6 +433,7 @@ func (nm *NodeWatcherImpl) start() {
 	go nm.startTCPServer()
 	go nm.startUDPServer()
 	go nm.printLatencyToPeriodic()
+	go nm.printControlMessagesSent()
 }
 
 func (nm *NodeWatcherImpl) startUDPServer() {
@@ -440,6 +444,7 @@ func (nm *NodeWatcherImpl) startUDPServer() {
 			nm.logger.Warn(rErr)
 			continue
 		}
+		nm.addMsgReceived()
 		nm.handleHBMessageUDP(msgBuf[:n])
 	}
 }
@@ -472,15 +477,14 @@ func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
 			nm.logger.Errorf("error closing connection: %w", err)
 		}
 	}()
-
 	frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, c)
-
 	for {
 		frame, rErr := frameBasedConn.ReadFrame()
 		if rErr != nil {
 			nm.logger.Warn(rErr)
 			return
 		}
+		nm.addMsgReceived()
 		err := nm.handleHBMessageTCP(frame, frameBasedConn)
 		if err != nil {
 			nm.logger.Warn(err.Reason())
@@ -491,8 +495,6 @@ func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
 
 func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.FrameConn) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
-	nm.addMsgReceived()
-
 	if hb.IsReply {
 		nodeInfoInt, ok := nm.watching.Load(hb.Sender.String())
 		if !ok {
@@ -515,6 +517,7 @@ func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.Frame
 		}
 
 		err := mw.WriteFrame(analytics.SerializeHeartbeatMessage(toSend))
+		nm.addMsgSent()
 		if err != nil {
 			return errors.NonFatalError(500, err.Error(), nodeWatcherCaller)
 		}
@@ -553,6 +556,7 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 		}
 
 		_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(toSend), &rAddr)
+		nm.addMsgSent()
 		if err != nil {
 			return errors.NonFatalError(500, err.Error(), nodeWatcherCaller)
 		}
@@ -629,9 +633,7 @@ func (nm *NodeWatcherImpl) NotifyOnCondition(c nodeWatcher.Condition) (string, e
 func (nm *NodeWatcherImpl) printControlMessagesSent() {
 	for range time.NewTicker(10 * time.Second).C {
 		nm.receivedCounterMux.Lock()
-		defer nm.receivedCounterMux.Unlock()
 		nm.sentCounterMux.Lock()
-		defer nm.sentCounterMux.Unlock()
 		toPrint := struct {
 			ControlMessagesSent     int
 			ControlMessagesReceived int
@@ -639,12 +641,14 @@ func (nm *NodeWatcherImpl) printControlMessagesSent() {
 			ControlMessagesSent:     int(nm.msgCountersSent),
 			ControlMessagesReceived: int(nm.msgCountersRecvd),
 		}
+		nm.receivedCounterMux.Unlock()
+		nm.sentCounterMux.Unlock()
 
-		toPrint_json, err := json.Marshal(toPrint)
+		toPrintJSON, err := json.Marshal(toPrint)
 		if err != nil {
 			panic(err)
 		}
-		nm.logger.Infof("<control-messages-stats>:%s", string(toPrint_json))
+		nm.logger.Infof("<control-messages-stats>:%s", string(toPrintJSON))
 	}
 }
 
