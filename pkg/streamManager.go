@@ -760,17 +760,20 @@ func (sm *babelStreamManager) logStreamManagerState() {
 func (sm *babelStreamManager) logMsgStats() {
 	sm.receivedCounterMux.Lock()
 	defer sm.receivedCounterMux.Unlock()
-	toPrint, err := json.Marshal(sm.msgCountersSent)
-	if err != nil {
-		panic(err)
-	}
-	sm.logger.Infof("<messages-sent>:%s", string(toPrint))
-
 	sm.sentCounterMux.Lock()
 	defer sm.sentCounterMux.Unlock()
-	toPrint, err = json.Marshal(sm.msgCountersRecvd)
+
+	var toPrint = struct {
+		ApplicationalMessagesSent     map[uint16]int64
+		ApplicationalMessagesReceived map[uint16]int64
+	}{
+		ApplicationalMessagesSent:     sm.msgCountersSent,
+		ApplicationalMessagesReceived: sm.msgCountersRecvd,
+	}
+
+	toPrint_json, err := json.Marshal(toPrint)
 	if err != nil {
 		panic(err)
 	}
-	sm.logger.Infof("<messages-received>:%s", string(toPrint))
+	sm.logger.Infof("<app-messages-stats>:%s", string(toPrint_json))
 }

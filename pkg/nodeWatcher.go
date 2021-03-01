@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -133,6 +134,11 @@ type NodeWatcherImpl struct {
 	selfPeer peer.Peer
 	conf     NodeWatcherConf
 
+	sentCounterMux     *sync.Mutex
+	receivedCounterMux *sync.Mutex
+	msgCountersSent    int64
+	msgCountersRecvd   int64
+
 	watching      sync.Map
 	udpConn       net.UDPConn
 	conditionsTeq timerQueue.TimedEventQueue
@@ -169,13 +175,17 @@ type NodeWatcherConf struct {
 func NewNodeWatcher(config NodeWatcherConf, babel protocolManager.ProtocolManager) nodeWatcher.NodeWatcher {
 	logger := logs.NewLogger(nodeWatcherCaller)
 	nm := &NodeWatcherImpl{
-		babel:         babel,
-		conf:          config,
-		watching:      sync.Map{},
-		selfPeer:      peer.NewPeer(config.AdvertiseListenAddr, babel.SelfPeer().ProtosPort(), uint16(config.ListenPort)),
-		conditionsTeq: timerQueue.NewTimedEventQueue(logger),
-		hbTeq:         timerQueue.NewTimedEventQueue(logger),
-		logger:        logger,
+		babel:              babel,
+		conf:               config,
+		sentCounterMux:     &sync.Mutex{},
+		receivedCounterMux: &sync.Mutex{},
+		msgCountersSent:    0,
+		msgCountersRecvd:   0,
+		watching:           sync.Map{},
+		udpConn:            net.UDPConn{},
+		conditionsTeq:      timerQueue.NewTimedEventQueue(logger),
+		hbTeq:              timerQueue.NewTimedEventQueue(logger),
+		logger:             logger,
 	}
 
 	nm.logger.Infof("Starting nodeWatcher with config: %+v", config)
@@ -313,56 +323,6 @@ func (nm *NodeWatcherImpl) WatchWithInitialLatencyValue(p peer.Peer, issuerProto
 func (nm *NodeWatcherImpl) startHbRoutine(nodeInfo *NodeInfoImpl) {
 	timeNow := time.Now()
 	nm.hbTeq.Add(nodeInfo, timeNow)
-	// toSend := analytics.NewHBMessageForceReply(nm.selfPeer, true)
-	// ticker := time.NewTicker(nm.conf.HbTickDuration)
-	// switch conn := nodeInfo.peerConn.(type) {
-	// case net.PacketConn:
-	// 	rAddrUdp := &net.UDPAddr{IP: nodeInfo.Peer().IP(), Port: int(nodeInfo.Peer().AnalyticsPort())}
-
-	// 	for i := 0; i < nm.conf.NrMessagesWithoutWait; i++ {
-	// 		_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(toSend), rAddrUdp)
-	// 		if err != nil {
-	// 			nm.logger.Panic("err in udp conn")
-	// 		}
-	// 	}
-	// 	for {
-	// 		select {
-	// 		case <-ticker.C:
-	// 			toSend := analytics.NewHBMessageForceReply(nm.selfPeer, false)
-	// 			//nm.logger.Infof("sending hb message:%+v", toSend)
-	// 			//nm.logger.Infof("Sent HB to %s via UDP", nodeInfo.*peer.ToString())
-	// 			_, err := nm.udpConn.WriteToUDP(analytics.SerializeHeartbeatMessage(toSend), rAddrUdp)
-	// 			if err != nil {
-	// 				close(nodeInfo.err)
-	// 				return
-	// 			}
-	// 		case <-nodeInfo.unwatch:
-	// 			return
-	// 		}
-	// 	}
-	// case net.Conn:
-	// 	frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, conn)
-	// 	for i := 0; i < nm.conf.NrMessagesWithoutWait; i++ {
-	// 		err := frameBasedConn.WriteFrame(analytics.SerializeHeartbeatMessage(toSend))
-	// 		if err != nil {
-	// 			close(nodeInfo.err)
-	// 			return
-	// 		}
-	// 	}
-	// 	for {
-	// 		select {
-	// 		case <-ticker.C:
-	// 			toSend := analytics.NewHBMessageForceReply(nm.selfPeer, false)
-	// 			err := frameBasedConn.WriteFrame(analytics.SerializeHeartbeatMessage(toSend))
-	// 			if err != nil {
-	// 				close(nodeInfo.err)
-	// 				return
-	// 			}
-	// 		case <-nodeInfo.unwatch:
-	// 			return
-	// 		}
-	// 	}
-	// }
 }
 
 func (nm *NodeWatcherImpl) Unwatch(peer peer.Peer, protoID protocol.ID) errors.Error {
@@ -530,8 +490,9 @@ func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
 
 func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.FrameConn) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
-	if hb.IsReply {
+	nm.addMsgReceived()
 
+	if hb.IsReply {
 		nodeInfoInt, ok := nm.watching.Load(hb.Sender.String())
 		if !ok {
 			return errors.NonFatalError(404, "peer not being tracked", nodeWatcherCaller)
@@ -541,6 +502,7 @@ func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.Frame
 		nm.registerHBReply(hb, nodeInfo)
 		return nil
 	}
+
 	if hb.ForceReply {
 		//nm.logger.Infof("replying to hb message")
 		toSend := analytics.HeartbeatMessage{
@@ -599,6 +561,18 @@ func (nm *NodeWatcherImpl) handleHBMessageUDP(hbBytes []byte) errors.Error {
 	return nil
 }
 
+func (nm *NodeWatcherImpl) addMsgSent() {
+	nm.sentCounterMux.Lock()
+	nm.msgCountersSent++
+	nm.sentCounterMux.Unlock()
+}
+
+func (nm *NodeWatcherImpl) addMsgReceived() {
+	nm.receivedCounterMux.Lock()
+	nm.msgCountersRecvd++
+	nm.receivedCounterMux.Unlock()
+}
+
 func (nm *NodeWatcherImpl) registerHBReply(hb analytics.HeartbeatMessage, nodeInfo *NodeInfoImpl) {
 
 	if !hb.Initial {
@@ -649,6 +623,28 @@ func (nm *NodeWatcherImpl) NotifyOnCondition(c nodeWatcher.Condition) (string, e
 	nm.conditionsTeq.Add(conditionWrapper, time.Now().Add(c.EvalConditionTickDuration))
 	nm.logger.Infof("Adding condition %+v for peer %s", c, c.Peer.String())
 	return condId, nil
+}
+
+func (nm *NodeWatcherImpl) printControlMessagesSent() {
+	for range time.NewTicker(10 * time.Second).C {
+		nm.receivedCounterMux.Lock()
+		defer nm.receivedCounterMux.Unlock()
+		nm.sentCounterMux.Lock()
+		defer nm.sentCounterMux.Unlock()
+		toPrint := struct {
+			ControlMessagesSent     int
+			ControlMessagesReceived int
+		}{
+			ControlMessagesSent:     int(nm.msgCountersSent),
+			ControlMessagesReceived: int(nm.msgCountersRecvd),
+		}
+
+		toPrint_json, err := json.Marshal(toPrint)
+		if err != nil {
+			panic(err)
+		}
+		nm.logger.Infof("<control-messages-stats>:%s", string(toPrint_json))
+	}
 }
 
 func (nm *NodeWatcherImpl) printLatencyToPeriodic() {
