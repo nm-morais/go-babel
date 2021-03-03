@@ -648,7 +648,7 @@ func (nm *NodeWatcherImpl) printControlMessagesSent() {
 		if err != nil {
 			panic(err)
 		}
-		nm.logger.Infof("<control-messages-stats>:%s", string(toPrintJSON))
+		nm.logger.Infof("<control-messages-stats> %s", string(toPrintJSON))
 	}
 }
 

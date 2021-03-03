@@ -775,5 +775,5 @@ func (sm *babelStreamManager) logMsgStats() {
 	if err != nil {
 		panic(err)
 	}
-	sm.logger.Infof("<app-messages-stats>:%s", string(toPrintJSON))
+	sm.logger.Infof("<app-messages-stats> %s", string(toPrintJSON))
 }
