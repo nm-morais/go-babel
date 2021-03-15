@@ -344,7 +344,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 						return
 					}
 
-					sm.logger.Warnf("Accepted connection from %s successfully", remotePeer.String())
+					sm.logger.Infof("Accepted connection from %s successfully", remotePeer.String())
 					sm.logStreamManagerState()
 					sm.inboundTransports.Store(remotePeer.String(), newStream)
 					go sm.handleInStream(frameBasedConn, remotePeer)
