@@ -171,7 +171,7 @@ func (m *PingPongProtocol) DialSuccess(sourceProto protocol.ID, peer peer.Peer) 
 	m.logger.Infof("Connection established to peer %+v", peer.String())
 	if sourceProto == protoID {
 		m.activePeers[peer.String()] = peer
-		m.babel.RegisterPeriodicTimer(protoID, PingTimer{duration: 3 * time.Second})
+		m.babel.RegisterPeriodicTimer(protoID, PingTimer{duration: 3 * time.Second}, true)
 		return true
 	}
 	return false

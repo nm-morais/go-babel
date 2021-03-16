@@ -397,7 +397,10 @@ func (p *protoManager) RegisterTimer(origin protocol.ID, timer timer.Timer) int 
 	return p.tq.AddTimer(timer, origin)
 }
 
-func (p *protoManager) RegisterPeriodicTimer(origin protocol.ID, timer timer.Timer) int {
+func (p *protoManager) RegisterPeriodicTimer(origin protocol.ID, timer timer.Timer, triggerAtTimeZero bool) int {
+	if triggerAtTimeZero {
+		p.DeliverTimer(timer, origin)
+	}
 	return p.tq.AddPeriodicTimer(timer, origin)
 }
 
