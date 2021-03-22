@@ -6,6 +6,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/message"
+	"github.com/nm-morais/go-babel/pkg/nodeWatcher"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
@@ -46,6 +47,7 @@ type ProtocolManager interface {
 
 	SerializationManager() serializationManager.SerializationManager
 
+	RegisterNodeWatcher(nw nodeWatcher.NodeWatcher)
 	RegisterNotificationHandler(
 		protoID protocol.ID,
 		notification notification.Notification,
