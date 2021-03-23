@@ -552,7 +552,7 @@ func (sm *babelStreamManager) SendMessage(
 				if loaded {
 					outboundStream = outboundStreamInt.(*outboundTransport)
 					sm.closeConn(outboundStream.conn)
-					sm.babel.OutTransportFailure(origin, destPeer)
+					sm.babel.OutTransportFailure(outboundStream.originProto, destPeer)
 				}
 				return errors.NonFatalError(500, "error sending message", streamManagerCaller)
 			}
