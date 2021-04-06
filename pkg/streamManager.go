@@ -657,7 +657,8 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 		}
 
 		if len(msgBuf) == 0 {
-			panic("got 0 bytes from conn")
+			sm.logger.Error("got 0 bytes from conn")
+			continue
 		}
 
 		for i := 0; i < len(msgBuf); {
