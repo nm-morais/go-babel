@@ -104,6 +104,7 @@ func (tq *timedEventQueue) run() {
 		waitTime = time.Until(time.Unix(0, nextItem.Priority))
 		nextItemTimer := time.NewTimer(waitTime)
 
+	outer:
 		select {
 		case newItem := <-tq.addTimedEventChan:
 			// tq.logger.Infof("Added new item %s successfully", newItem.item.ID())
@@ -117,7 +118,7 @@ func (tq *timedEventQueue) run() {
 					// tq.logger.Infof("Removed item %s successfully", req.key)
 					req.respChan <- true
 
-					goto finish
+					break outer
 				}
 				reAdd(nextItem)
 			}
@@ -132,7 +133,7 @@ func (tq *timedEventQueue) run() {
 				// tq.logger.Infof("Removed item %s successfully", req.key)
 				req.respChan <- true
 
-				goto finish
+				break outer
 			}
 
 			req.respChan <- false
@@ -145,8 +146,6 @@ func (tq *timedEventQueue) run() {
 				reAdd(nextItem)
 			}
 		}
-
-	finish:
 		nextItemTimer.Stop()
 	}
 }
