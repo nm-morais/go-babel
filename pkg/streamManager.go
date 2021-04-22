@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"reflect"
 	"sync"
@@ -244,6 +245,7 @@ func (sm *babelStreamManager) SendMessageSideStream(
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
 			return errors.NonFatalError(500, err.Error(), streamManagerCaller)
 		}
+		defer tcpStream.Close()
 		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, tcpStream)
 		hErr := sm.sendHandshakeMessage(frameBasedConn, sourceProtoID, TemporaryTunnel)
 		if hErr != nil {
@@ -260,10 +262,7 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		}
 		sm.babel.MessageDelivered(sourceProtoID, toSend, peer)
 		sm.addMsgSent(sourceProtoID)
-		err = tcpStream.Close()
-		if err != nil {
-			sm.logger.Errorf("Err: %s", err.Error())
-		}
+		io.Copy(ioutil.Discard, tcpStream)
 	default:
 		log.Panicf("Unknown addr type %s", reflect.TypeOf(rAddr))
 	}
@@ -683,6 +682,8 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 
 func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.FrameConn) {
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
+	defer sm.closeConn(c)
+
 	if newPeer.String() == sm.babel.SelfPeer().String() {
 		sm.logger.Panic("Dialing self")
 	}
@@ -690,6 +691,7 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.Fra
 	//sm.logger.Info("Reading from tmp stream")
 	msgBytes, err := c.ReadFrame()
 	if err != nil {
+		sm.logger.Errorf("Error reading in tmp stream: %s", err.Error())
 		return
 	}
 	msgGeneric := deserializer.Deserialize(msgBytes)
@@ -701,7 +703,6 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.Fra
 	}
 	sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
 	sm.addMsgReceived(msgWrapper.DestProto)
-	sm.closeConn(c)
 }
 
 func (sm *babelStreamManager) waitForHandshakeMessage(frameBasedConn messageIO.FrameConn) (
