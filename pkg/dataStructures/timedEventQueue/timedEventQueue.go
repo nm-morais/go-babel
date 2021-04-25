@@ -38,8 +38,8 @@ type timedEventQueue struct {
 func NewTimedEventQueue(logger *logrus.Logger) TimedEventQueue {
 	tq := &timedEventQueue{
 		pq:                   &priorityqueue.PriorityQueue{},
-		addTimedEventChan:    make(chan addItemReq),
-		removeTimedEventChan: make(chan removeItemReq),
+		addTimedEventChan:    make(chan addItemReq, 100),
+		removeTimedEventChan: make(chan removeItemReq, 100),
 		logger:               logger,
 	}
 	go tq.run()
@@ -64,7 +64,6 @@ func (tq *timedEventQueue) Remove(itemID string) bool {
 }
 
 func (tq *timedEventQueue) run() {
-
 	addNew := func(newItem Item, nextTrigger time.Time) {
 		if newItem != nil {
 			aux := &priorityqueue.Item{

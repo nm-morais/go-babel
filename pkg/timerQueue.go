@@ -74,12 +74,13 @@ func (tq *timerQueueImpl) AddPeriodicTimer(timer timer.Timer, protocolId protoco
 		babel:    tq.babel,
 	}
 	nextTrigger := time.Now().Add(timerWrapper.Periodicity())
-	tq.teq.Add(timerWrapper, nextTrigger)
+	go tq.teq.Add(timerWrapper, nextTrigger)
 	return newTimerID
 }
 
 func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) int {
 	newTimerID := rand.Int()
+
 	timerWrapper := &timerWrapper{
 		periodic: false,
 		id:       newTimerID,
@@ -88,7 +89,7 @@ func (tq *timerQueueImpl) AddTimer(timer timer.Timer, protocolId protocol.ID) in
 		babel:    tq.babel,
 	}
 	nextTrigger := time.Now().Add(timerWrapper.Periodicity())
-	tq.teq.Add(timerWrapper, nextTrigger)
+	go tq.teq.Add(timerWrapper, nextTrigger)
 	return newTimerID
 }
 

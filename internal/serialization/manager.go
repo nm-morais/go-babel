@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	ErrDeserialization = errors.New("Deserialization error")
-	ErrNoSerializer    = errors.New("No serializer for message")
-	ErrNoDeserializer  = errors.New("No deserializer for message")
+	ErrDeserialization = errors.New("deserialization error")
+	ErrNoSerializer    = errors.New("no serializer for message")
+	ErrNoDeserializer  = errors.New("no deserializer for message")
 )
 
 type Manager struct {

@@ -291,7 +291,7 @@ func (sm *babelStreamManager) closeConn(c messageIO.FrameConn) {
 func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan interface{} {
 	done := make(chan interface{})
 	go func() {
-		sm.logger.Infof("Starting listener of type %s", lAddrInt.Network())
+		sm.logger.Infof("Starting listener of type %s on addr: %s", lAddrInt.Network(), lAddrInt.String())
 		switch lAddr := lAddrInt.(type) {
 		case *net.TCPAddr:
 			listener, err := net.ListenTCP(lAddr.Network(), lAddr)
@@ -370,7 +370,8 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				protoMsg := deserialized.(*internalMsg.AppMessageWrapper)
 				appMsg, err := sm.babel.SerializationManager().Deserialize(protoMsg.MessageID, protoMsg.WrappedMsgBytes)
 				if err != nil {
-					sm.logger.Panicf("Error %s deserializing message of type %d from node %s", err.Error(), protoMsg.MessageID, sender)
+					sm.logger.Errorf("Error %s deserializing message of type %d from node %s", err.Error(), protoMsg.MessageID, sender)
+					continue
 				}
 				sm.babel.DeliverMessage(sender, appMsg, protoMsg.DestProto)
 				sm.addMsgReceived(protoMsg.DestProto)
@@ -664,14 +665,21 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 			msgSize := binary.BigEndian.Uint32(msgBuf[i : i+4])
 			i += 4
 			if msgSize == 0 && len(msgBuf) > i+int(msgSize) {
-				sm.logger.Panicf("Msg size is %d and i: %d but still have %d bytes total to read from batch", msgSize, i, len(msgBuf)-i)
+				sm.logger.Errorf("Msg size is %d and i: %d but still have %d bytes total to read from batch", msgSize, i, len(msgBuf)-i)
+				break
+			}
+
+			if i+int(msgSize) > len(msgBuf) {
+				sm.logger.Errorf("Msg size is %d and i: %d but still have %d bytes total to read from batch", msgSize, i, len(msgBuf)-i)
+				break
 			}
 
 			msgGeneric := deserializer.Deserialize(msgBuf[i : i+int(msgSize)])
 			msgWrapper := msgGeneric.(*internalMsg.AppMessageWrapper)
 			appMsg, err := sm.babel.SerializationManager().Deserialize(msgWrapper.MessageID, msgWrapper.WrappedMsgBytes)
 			if err != nil {
-				sm.logger.Panicf("Got error %s deserializing message of type %d from %s", err.Error(), msgWrapper.MessageID, newPeer)
+				sm.logger.Errorf("Got error %s deserializing message of type %d from %s", err.Error(), msgWrapper.MessageID, newPeer)
+				break
 			}
 			sm.babel.DeliverMessage(newPeer, appMsg, msgWrapper.DestProto)
 			sm.addMsgReceived(msgWrapper.DestProto)

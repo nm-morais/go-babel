@@ -53,6 +53,7 @@ func (serializer AppMessageWrapperSerializer) Serialize(toSerialize message.Mess
 	binary.BigEndian.PutUint16(buf, wrapperMsg.MessageID)
 	binary.BigEndian.PutUint16(buf[2:], wrapperMsg.SourceProto)
 	binary.BigEndian.PutUint16(buf[4:], wrapperMsg.DestProto)
+
 	return append(buf, wrapperMsg.WrappedMsgBytes...)
 }
 
@@ -62,5 +63,6 @@ func (serializer AppMessageWrapperSerializer) Deserialize(buf []byte) message.Me
 	msg.SourceProto = binary.BigEndian.Uint16(buf[2:])
 	msg.DestProto = binary.BigEndian.Uint16(buf[4:])
 	msg.WrappedMsgBytes = buf[6:]
+
 	return msg
 }
