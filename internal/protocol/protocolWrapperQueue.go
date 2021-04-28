@@ -3,10 +3,13 @@ package frontend
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	blockingqueue "github.com/nm-morais/go-babel/pkg/dataStructures/blockingQueue"
+	// blockingqueue "github.com/nm-morais/go-babel/pkg/dataStructures/blockingQueue"
+	// blockingqueue "github.com/nm-morais/go-babel/pkg/dataStructures/blockingQueue"
+	"github.com/enriquebris/goconcurrentqueue"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/message"
@@ -54,7 +57,7 @@ type WrapperProtocol struct {
 	timerHandlers        map[timer.ID]handlers.TimerHandler
 
 	// event queue
-	eventQueue *blockingqueue.BlockingQueue
+	eventQueue *goconcurrentqueue.FIFO
 }
 
 type reqWithReplyCHan struct {
@@ -85,10 +88,10 @@ type inConnReqEventWithBoolReply struct {
 	respChan    chan bool
 }
 
-func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
-	wp := WrapperProtocol{
-		id:              protocol.ID(),
-		wrappedProtocol: protocol,
+func NewWrapperProtocol(p protocol.Protocol) *WrapperProtocol {
+	wp := &WrapperProtocol{
+		id:              p.ID(),
+		wrappedProtocol: p,
 
 		notificationHandlers: make(map[notification.ID]handlers.NotificationHandler),
 		requestHandlers:      make(map[request.ID]handlers.RequestHandler),
@@ -96,11 +99,7 @@ func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
 		replyHandlers:        make(map[request.ID]handlers.ReplyHandler),
 		timerHandlers:        make(map[timer.ID]handlers.TimerHandler),
 	}
-	newEventQueue, err := blockingqueue.NewArrayBlockingQueue(QueueSize)
-	if err != nil {
-		wp.Logger().Panic(err)
-	}
-
+	newEventQueue := goconcurrentqueue.NewFIFO()
 	wp.eventQueue = newEventQueue
 
 	return wp
@@ -108,20 +107,20 @@ func NewWrapperProtocol(protocol protocol.Protocol) WrapperProtocol {
 
 //  channel Deliverers
 
-func (pw WrapperProtocol) DeliverRequestReply(reply request.Reply) {
-	if _, err := pw.eventQueue.Put(NewEvent(requestReplyEvent, reply)); err != nil {
+func (pw *WrapperProtocol) DeliverRequestReply(reply request.Reply) {
+	if err := pw.eventQueue.Enqueue(NewEvent(requestReplyEvent, reply)); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
 
-func (pw WrapperProtocol) DeliverNotification(notification notification.Notification) {
-	if _, err := pw.eventQueue.Put(NewEvent(notificationEvent, notification)); err != nil {
+func (pw *WrapperProtocol) DeliverNotification(n notification.Notification) {
+	if err := pw.eventQueue.Enqueue(NewEvent(notificationEvent, n)); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
 
-func (pw WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
-	_, err := pw.eventQueue.Put(
+func (pw *WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
+	err := pw.eventQueue.Enqueue(
 		NewEvent(
 			messageEvent, messageWithPeer{
 				peer:    sender,
@@ -134,18 +133,18 @@ func (pw WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) 
 	}
 }
 
-func (pw WrapperProtocol) DeliverTimer(timer timer.Timer) {
-	if _, err := pw.eventQueue.Put(NewEvent(timerEvent, timer)); err != nil {
+func (pw *WrapperProtocol) DeliverTimer(t timer.Timer) {
+	if err := pw.eventQueue.Enqueue(NewEvent(timerEvent, t)); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
 
-func (pw WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Reply {
+func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Reply {
 	aux := reqWithReplyCHan{
 		req:      req,
 		respChan: make(chan request.Reply),
 	}
-	if _, err := pw.eventQueue.Put(NewEvent(requestEvent, aux)); err != nil {
+	if err := pw.eventQueue.Enqueue(NewEvent(requestEvent, aux)); err != nil {
 		pw.Logger().Panic(err)
 	}
 	return aux.respChan
@@ -153,12 +152,12 @@ func (pw WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Rep
 
 // network events
 
-func (pw WrapperProtocol) MessageDelivered(message message.Message, peer peer.Peer) {
-	if _, err := pw.eventQueue.Put(
+func (pw *WrapperProtocol) MessageDelivered(m message.Message, p peer.Peer) {
+	if err := pw.eventQueue.Enqueue(
 		NewEvent(
 			messageDeliverySucessEvent, messageWithPeer{
-				peer:    peer,
-				message: message,
+				peer:    p,
+				message: m,
 			},
 		),
 	); err != nil {
@@ -166,14 +165,13 @@ func (pw WrapperProtocol) MessageDelivered(message message.Message, peer peer.Pe
 	}
 }
 
-func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
-
-	if _, err := pw.eventQueue.Put(
+func (pw *WrapperProtocol) MessageDeliveryErr(m message.Message, p peer.Peer, err errors.Error) {
+	if err := pw.eventQueue.Enqueue(
 		NewEvent(
 			messageDeliveryFailureEvent, messageWithPeerAndErr{
-				peer:    peer,
-				message: message,
-				err:     error,
+				peer:    p,
+				message: m,
+				err:     err,
 			},
 		),
 	); err != nil {
@@ -181,13 +179,13 @@ func (pw WrapperProtocol) MessageDeliveryErr(message message.Message, peer peer.
 	}
 }
 
-func (pw WrapperProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Peer) bool {
+func (pw *WrapperProtocol) InConnRequested(dialerProto protocol.ID, p peer.Peer) bool {
 	event := inConnReqEventWithBoolReply{
 		dialerProto: dialerProto,
-		peer:        peer,
+		peer:        p,
 		respChan:    make(chan bool),
 	}
-	if _, err := pw.eventQueue.Put(NewEvent(inConnRequestedEvent, event)); err != nil {
+	if err := pw.eventQueue.Enqueue(NewEvent(inConnRequestedEvent, event)); err != nil {
 		pw.Logger().Panic(err)
 	}
 
@@ -195,13 +193,13 @@ func (pw WrapperProtocol) InConnRequested(dialerProto protocol.ID, peer peer.Pee
 	return reply
 }
 
-func (pw WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) bool {
+func (pw *WrapperProtocol) DialSuccess(dialerProto protocol.ID, p peer.Peer) bool {
 	event := dialSuccessWithBoolReplyChan{
 		dialingProto: dialerProto,
-		peer:         peer,
+		peer:         p,
 		respChan:     make(chan bool),
 	}
-	if _, err := pw.eventQueue.Put(NewEvent(dialSuccessEvent, event)); err != nil {
+	if err := pw.eventQueue.Enqueue(NewEvent(dialSuccessEvent, event)); err != nil {
 		pw.Logger().Panic(err)
 	}
 
@@ -209,40 +207,47 @@ func (pw WrapperProtocol) DialSuccess(dialerProto protocol.ID, peer peer.Peer) b
 	return reply
 }
 
-func (pw WrapperProtocol) DialFailed(peer peer.Peer) {
-	if _, err := pw.eventQueue.Put(NewEvent(dialFailedEvent, peer)); err != nil {
+func (pw *WrapperProtocol) DialFailed(p peer.Peer) {
+	if err := pw.eventQueue.Enqueue(NewEvent(dialFailedEvent, p)); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
 
-func (pw WrapperProtocol) OutConnDown(peer peer.Peer) {
-	if _, err := pw.eventQueue.Put(NewEvent(outConnDownEvent, peer)); err != nil {
+func (pw *WrapperProtocol) OutConnDown(p peer.Peer) {
+	if err := pw.eventQueue.Enqueue(NewEvent(outConnDownEvent, p)); err != nil {
 		pw.Logger().Panic(err)
 	}
 }
 
-func (pw WrapperProtocol) ID() protocol.ID {
+func (pw *WrapperProtocol) ID() protocol.ID {
 	return pw.wrappedProtocol.ID()
 }
 
-func (pw WrapperProtocol) Start() {
+func (pw *WrapperProtocol) Start() {
 	pw.wrappedProtocol.Start()
 	go pw.handleChannels()
 }
 
-func (pw WrapperProtocol) Init() {
+func (pw *WrapperProtocol) Init() {
 	pw.wrappedProtocol.Init()
 }
 
 // channel handler
 
-func (pw WrapperProtocol) handleChannels() {
+func (pw *WrapperProtocol) handleChannels() {
+	go func() {
+		for range time.NewTicker(5 * time.Second).C {
+			pw.Logger().Infof("Nr events in queue: %d", pw.eventQueue.GetLen())
+		}
+	}()
+
 	for {
-		nextEventInterface, err := pw.eventQueue.Get()
+		nextEventInterface, err := pw.eventQueue.DequeueOrWaitForNextElement()
 		if err != nil {
 			pw.Logger().Panic(err)
 		}
 		nextEvent := nextEventInterface.(*event)
+
 		switch nextEvent.eventype {
 		case inConnRequestedEvent:
 			event := nextEvent.eventContent.(inConnReqEventWithBoolReply)
@@ -280,23 +285,23 @@ func (pw WrapperProtocol) handleChannels() {
 
 // internal handlers
 
-func (pw WrapperProtocol) handleNotification(notification notification.Notification) {
-	handler, ok := pw.notificationHandlers[notification.ID()]
+func (pw *WrapperProtocol) handleNotification(n notification.Notification) {
+	handler, ok := pw.notificationHandlers[n.ID()]
 	if !ok {
 		pw.Logger().Panic("notification handler not found")
 	}
-	handler(notification)
+	handler(n)
 }
 
-func (pw WrapperProtocol) handleTimer(timer timer.Timer) {
-	handler, ok := pw.timerHandlers[timer.ID()]
+func (pw *WrapperProtocol) handleTimer(t timer.Timer) {
+	handler, ok := pw.timerHandlers[t.ID()]
 	if !ok {
 		pw.Logger().Panic("timer handler not found")
 	}
-	handler(timer)
+	handler(t)
 }
 
-func (pw WrapperProtocol) handleReply(reply request.Reply) {
+func (pw *WrapperProtocol) handleReply(reply request.Reply) {
 	handler, ok := pw.replyHandlers[reply.ID()]
 	if !ok {
 		pw.Logger().Panic("reply handler not found")
@@ -304,7 +309,7 @@ func (pw WrapperProtocol) handleReply(reply request.Reply) {
 	handler(reply)
 }
 
-func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Message) {
+func (pw *WrapperProtocol) handleMessage(p peer.Peer, receivedMsg message.Message) {
 	handler, ok := pw.messageHandlers[receivedMsg.Type()]
 	if !ok {
 		pw.Logger().Panic(
@@ -315,11 +320,11 @@ func (pw WrapperProtocol) handleMessage(peer peer.Peer, receivedMsg message.Mess
 			),
 		)
 	}
-	handler(peer, receivedMsg)
+	handler(p, receivedMsg)
 }
 
-func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
-	handler, ok := pw.requestHandlers[request.ID()]
+func (pw *WrapperProtocol) handleRequest(r request.Request) request.Reply {
+	handler, ok := pw.requestHandlers[r.ID()]
 	if !ok {
 		pw.Logger().Panic(
 			errors.FatalError(
@@ -328,7 +333,7 @@ func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
 			),
 		)
 	}
-	return handler(request)
+	return handler(r)
 }
 
 // Register handlers
@@ -339,7 +344,7 @@ func (pw WrapperProtocol) handleRequest(request request.Request) request.Reply {
 // replies
 // timer
 
-func (pw WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
+func (pw *WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler handlers.MessageHandler) errors.Error {
 	_, exists := pw.messageHandlers[messageID]
 	if exists {
 		return errors.FatalError(
@@ -352,7 +357,7 @@ func (pw WrapperProtocol) RegisterMessageHandler(messageID message.ID, handler h
 	return nil
 }
 
-func (pw WrapperProtocol) RegisterNotificationHandler(
+func (pw *WrapperProtocol) RegisterNotificationHandler(
 	notificationID notification.ID,
 	handler handlers.NotificationHandler,
 ) errors.Error {
@@ -368,7 +373,7 @@ func (pw WrapperProtocol) RegisterNotificationHandler(
 	return nil
 }
 
-func (pw WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
+func (pw *WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handler handlers.ReplyHandler) errors.Error {
 	_, exists := pw.replyHandlers[replyID]
 	if exists {
 		return errors.FatalError(
@@ -381,7 +386,7 @@ func (pw WrapperProtocol) RegisterRequestReplyHandler(replyID request.ID, handle
 	return nil
 }
 
-func (pw WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
+func (pw *WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler handlers.RequestHandler) errors.Error {
 	_, exists := pw.requestHandlers[requestID]
 	if exists {
 		return errors.FatalError(
@@ -394,7 +399,7 @@ func (pw WrapperProtocol) RegisterRequestHandler(requestID request.ID, handler h
 	return nil
 }
 
-func (pw WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
+func (pw *WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handlers.TimerHandler) errors.Error {
 	_, exists := pw.timerHandlers[timerID]
 	if exists {
 		return errors.FatalError(
@@ -407,11 +412,11 @@ func (pw WrapperProtocol) RegisterTimerHandler(timerID timer.ID, handler handler
 	return nil
 }
 
-func (pw WrapperProtocol) Logger() *log.Logger {
+func (pw *WrapperProtocol) Logger() *log.Logger {
 	return pw.wrappedProtocol.Logger()
 }
 
-func (pw WrapperProtocol) Name() string {
+func (pw *WrapperProtocol) Name() string {
 	return pw.wrappedProtocol.Name()
 }
 

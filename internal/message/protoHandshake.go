@@ -8,6 +8,8 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocol"
 )
 
+const HandshakeMessageID = 1
+
 var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
 
 type ProtoHandshakeMessage struct {
@@ -16,16 +18,16 @@ type ProtoHandshakeMessage struct {
 	TunnelType  uint8
 }
 
-func NewProtoHandshakeMessage(dialerProto protocol.ID, peer peer.Peer, temporaryConn uint8) message.Message {
+func NewProtoHandshakeMessage(dialerProto protocol.ID, p peer.Peer, temporaryConn uint8) message.Message {
 	return ProtoHandshakeMessage{
 		DialerProto: dialerProto,
-		Peer:        peer,
+		Peer:        p,
 		TunnelType:  temporaryConn,
 	}
 }
 
 func (msg ProtoHandshakeMessage) Type() message.ID {
-	panic("implement me")
+	return HandshakeMessageID
 }
 
 type ProtoHandshakeMessageSerializer struct{}
@@ -38,8 +40,8 @@ func (msg ProtoHandshakeMessage) Deserializer() message.Deserializer {
 	return protoHandshakeMessageSerializer
 }
 
-func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []byte {
-	protoMsg := message.(ProtoHandshakeMessage)
+func (msg ProtoHandshakeMessageSerializer) Serialize(m message.Message) []byte {
+	protoMsg := m.(ProtoHandshakeMessage)
 	msgSize := 3
 	buf := make([]byte, msgSize)
 	bufPos := 0
@@ -47,6 +49,7 @@ func (msg ProtoHandshakeMessageSerializer) Serialize(message message.Message) []
 	bufPos++
 	binary.BigEndian.PutUint16(buf[bufPos:], protoMsg.DialerProto)
 	toSend := append(buf, protoMsg.Peer.Marshal()...)
+
 	return toSend
 }
 
@@ -61,5 +64,6 @@ func (msg ProtoHandshakeMessageSerializer) Deserialize(buf []byte) message.Messa
 	p.Unmarshal(buf[bufPos:])
 	newMsg.Peer = p
 	newMsg.DialerProto = dialerProto
+
 	return newMsg
 }

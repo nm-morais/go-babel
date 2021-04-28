@@ -13,7 +13,6 @@ import (
 	"time"
 
 	internalMsg "github.com/nm-morais/go-babel/internal/message"
-	"github.com/nm-morais/go-babel/internal/messageIO"
 	priorityqueue "github.com/nm-morais/go-babel/pkg/dataStructures/priorityQueue"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -22,17 +21,18 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	log "github.com/sirupsen/logrus"
+	"github.com/smallnest/goframe"
 )
 
 var (
-	encoderConfig = messageIO.EncoderConfig{
+	encoderConfig = goframe.EncoderConfig{
 		ByteOrder:                       binary.BigEndian,
 		LengthFieldLength:               4,
 		LengthAdjustment:                0,
 		LengthIncludesLengthFieldLength: false,
 	}
 
-	decoderConfig = messageIO.DecoderConfig{
+	decoderConfig = goframe.DecoderConfig{
 		ByteOrder:           binary.BigEndian,
 		LengthFieldOffset:   0,
 		LengthFieldLength:   4,
@@ -80,7 +80,7 @@ type outboundTransport struct {
 	DialErr  chan interface{}
 	Finished chan interface{}
 
-	conn   messageIO.FrameConn
+	conn   goframe.FrameConn
 	connMU *sync.Mutex
 
 	targetPeer  peer.Peer
@@ -218,7 +218,7 @@ func (sm *babelStreamManager) SendMessageSideStream(
 	switch rAddr := rAddrInt.(type) {
 	case *net.UDPAddr:
 		msgBytes := toSend.Serializer().Serialize(toSend)
-		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProto, msgBytes)
+		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProto, sm.babel.SelfPeer(), msgBytes)
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
 		peerBytes := sm.babel.SelfPeer().Marshal()
 		bytesToSend := append(peerBytes, wrappedBytes...)
@@ -246,14 +246,14 @@ func (sm *babelStreamManager) SendMessageSideStream(
 			return errors.NonFatalError(500, err.Error(), streamManagerCaller)
 		}
 		defer tcpStream.Close()
-		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, tcpStream)
+		frameBasedConn := goframe.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, tcpStream)
 		hErr := sm.sendHandshakeMessage(frameBasedConn, sourceProtoID, TemporaryTunnel)
 		if hErr != nil {
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, hErr)
 			return hErr
 		}
 		msgBytes := toSend.Serializer().Serialize(toSend)
-		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProto, msgBytes)
+		msgWrapper := internalMsg.NewAppMessageWrapper(toSend.Type(), sourceProtoID, destProto, sm.babel.SelfPeer(), msgBytes)
 		wrappedBytes := appMsgSerializer.Serialize(msgWrapper)
 		wErr := frameBasedConn.WriteFrame(wrappedBytes)
 		if wErr != nil {
@@ -281,7 +281,7 @@ func (sm *babelStreamManager) addMsgReceived(proto protocol.ID) {
 	sm.receivedCounterMux.Unlock()
 }
 
-func (sm *babelStreamManager) closeConn(c messageIO.FrameConn) {
+func (sm *babelStreamManager) closeConn(c goframe.FrameConn) {
 	err := c.Close()
 	if err != nil {
 		sm.logger.Errorf("Err: %+w", err)
@@ -306,7 +306,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 					sm.logger.Panic(err)
 				}
 				go func() {
-					frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStream)
+					frameBasedConn := goframe.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStream)
 					handshakeMsg, err := sm.waitForHandshakeMessage(frameBasedConn)
 					if err != nil {
 						err.Log(sm.logger)
@@ -422,7 +422,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		}
 		switch newStreamTyped := conn.(type) {
 		case net.Conn:
-			frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
+			frameBasedConn := goframe.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, newStreamTyped)
 			newOutboundTransport.conn = frameBasedConn
 			herr := sm.sendHandshakeMessage(frameBasedConn, dialingProto, PermanentTunnel)
 			if herr != nil {
@@ -515,6 +515,7 @@ func (sm *babelStreamManager) SendMessage(
 			toSend.Type(),
 			origin,
 			destination,
+			sm.babel.SelfPeer(),
 			internalMsgBytes,
 		))
 		sizeBytes := make([]byte, 4)
@@ -640,7 +641,7 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 	}
 }
 
-func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer peer.Peer) {
+func (sm *babelStreamManager) handleInStream(mr goframe.FrameConn, newPeer peer.Peer) {
 	sm.logger.Infof("[ConnectionEvent] : Handling peer stream %s", newPeer.String())
 	defer sm.logger.Infof("[ConnectionEvent] : Done handling peer stream %s", newPeer.String())
 
@@ -688,7 +689,7 @@ func (sm *babelStreamManager) handleInStream(mr messageIO.FrameConn, newPeer pee
 	}
 }
 
-func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.FrameConn) {
+func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c goframe.FrameConn) {
 	deserializer := internalMsg.AppMessageWrapperSerializer{}
 	defer sm.closeConn(c)
 
@@ -713,7 +714,7 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c messageIO.Fra
 	sm.addMsgReceived(msgWrapper.DestProto)
 }
 
-func (sm *babelStreamManager) waitForHandshakeMessage(frameBasedConn messageIO.FrameConn) (
+func (sm *babelStreamManager) waitForHandshakeMessage(frameBasedConn goframe.FrameConn) (
 	*internalMsg.ProtoHandshakeMessage,
 	errors.Error,
 ) {
@@ -730,7 +731,7 @@ func (sm *babelStreamManager) waitForHandshakeMessage(frameBasedConn messageIO.F
 }
 
 func (sm *babelStreamManager) sendHandshakeMessage(
-	transport messageIO.FrameConn,
+	transport goframe.FrameConn,
 	dialerProto protocol.ID,
 	chanType uint8,
 ) errors.Error {

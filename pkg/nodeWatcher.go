@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -10,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nm-morais/go-babel/internal/messageIO"
 	"github.com/nm-morais/go-babel/pkg/analytics"
 	timerQueue "github.com/nm-morais/go-babel/pkg/dataStructures/timedEventQueue"
 	"github.com/nm-morais/go-babel/pkg/errors"
@@ -20,6 +20,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/sirupsen/logrus"
+	"github.com/smallnest/goframe"
 )
 
 const nodeWatcherCaller = "NodeWatcher"
@@ -40,6 +41,23 @@ type NodeInfoImpl struct {
 	nw *NodeWatcherImpl
 }
 
+var (
+	nodeWacherConnEncoderConfig = goframe.EncoderConfig{
+		ByteOrder:                       binary.BigEndian,
+		LengthFieldLength:               4,
+		LengthAdjustment:                0,
+		LengthIncludesLengthFieldLength: false,
+	}
+
+	nodeWacherConnDecoderConfig = goframe.DecoderConfig{
+		ByteOrder:           binary.BigEndian,
+		LengthFieldOffset:   0,
+		LengthFieldLength:   4,
+		LengthAdjustment:    0,
+		InitialBytesToStrip: 4,
+	}
+)
+
 func (n *NodeInfoImpl) OnTrigger() (bool, *time.Time) {
 	select {
 	case <-n.unwatch:
@@ -59,7 +77,7 @@ func (n *NodeInfoImpl) OnTrigger() (bool, *time.Time) {
 		}
 		n.nw.addMsgSent()
 	case net.Conn:
-		frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, conn)
+		frameBasedConn := goframe.NewLengthFieldBasedFrameConn(nodeWacherConnEncoderConfig, nodeWacherConnDecoderConfig, conn)
 
 		toSend := analytics.NewHBMessageForceReply(n.nw.selfPeer, false)
 		err := frameBasedConn.WriteFrame(analytics.SerializeHeartbeatMessage(toSend))
@@ -477,7 +495,7 @@ func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
 			nm.logger.Errorf("error closing connection: %w", err)
 		}
 	}()
-	frameBasedConn := messageIO.NewLengthFieldBasedFrameConn(encoderConfig, decoderConfig, c)
+	frameBasedConn := goframe.NewLengthFieldBasedFrameConn(nodeWacherConnEncoderConfig, nodeWacherConnDecoderConfig, c)
 	for {
 		frame, rErr := frameBasedConn.ReadFrame()
 		if rErr != nil {
@@ -493,7 +511,7 @@ func (nm *NodeWatcherImpl) handleTCPConnection(c *net.TCPConn) {
 	}
 }
 
-func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw messageIO.FrameConn) errors.Error {
+func (nm *NodeWatcherImpl) handleHBMessageTCP(hbBytes []byte, mw goframe.FrameConn) errors.Error {
 	hb := analytics.DeserializeHeartbeatMessage(hbBytes)
 	if hb.IsReply {
 		nodeInfoInt, ok := nm.watching.Load(hb.Sender.String())
