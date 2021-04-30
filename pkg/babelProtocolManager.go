@@ -25,7 +25,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/serializationManager"
 	"github.com/nm-morais/go-babel/pkg/streamManager"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	"github.com/panjf2000/ants/v2"
+	"github.com/shettyh/threadpool"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -43,7 +43,7 @@ type Config struct {
 type protocolValueType = *internalProto.WrapperProtocol
 
 type protoManager struct {
-	pool                 *ants.Pool
+	pool                 *threadpool.ThreadPool
 	nw                   nodeWatcher.NodeWatcher
 	tq                   TimerQueue
 	config               Config
@@ -68,13 +68,8 @@ func NewProtoManager(configs Config) *protoManager {
 		protoIds:             []protocol.ID{},
 		logger:               logs.NewLogger(ProtoManagerCaller),
 	}
-	if configs.PoolSize == 0 {
-		configs.PoolSize = 20
-	}
-	pool, err := ants.NewPool(configs.PoolSize)
-	if err != nil {
-		p.logger.Panic(err)
-	}
+
+	pool := threadpool.NewThreadPool(50, 100_000)
 	p.pool = pool
 	p.tq = NewTimerQueue(p)
 	p.streamManager = NewStreamManager(p, configs.SmConf)
@@ -98,7 +93,7 @@ func (p *protoManager) RegisterProtocol(proto protocol.Protocol) errors.Error {
 	if ok {
 		p.logger.Panicf("Protocol %d already registered", proto.ID())
 	}
-	protocolWrapper := internalProto.NewWrapperProtocol(proto)
+	protocolWrapper := internalProto.NewWrapperProtocol(proto, p)
 	p.protocols.Store(proto.ID(), protocolWrapper)
 	p.protoIds = append(p.protoIds, proto.ID())
 	return nil
@@ -181,22 +176,6 @@ func (p *protoManager) SendMessageAndDisconnect(
 	origin protocol.ID,
 	destination protocol.ID,
 ) {
-	proto, ok := p.protocols.Load(origin)
-
-	defer func() {
-		if r := recover(); r != nil {
-			proto.(protocolValueType).MessageDeliveryErr(
-				toSend,
-				destPeer,
-				errors.NonFatalError(500, "an error occurred sending message", ProtoManagerCaller),
-			)
-		}
-	}()
-
-	if !ok {
-		p.logger.Panicf("Protocol %d not registered", origin)
-	}
-
 	go func() {
 		p.streamManager.SendMessage(toSend, destPeer, origin, destination, false)
 		p.Disconnect(origin, destPeer)
@@ -210,53 +189,66 @@ func (p *protoManager) SendMessage(
 	destination protocol.ID,
 	batch bool,
 ) {
-	p.submitOrPanic(func() {
-		proto, ok := p.protocols.Load(origin)
-		defer func() {
-			if r := recover(); r != nil {
-				proto.(protocolValueType).MessageDeliveryErr(
-					toSend,
-					destPeer,
-					errors.NonFatalError(500, "an error occurred sending message", ProtoManagerCaller),
-				)
-			}
-		}()
-		if !ok {
-			p.logger.Panicf("Protocol %d not registered", origin)
-		}
+	p.submitOrWait(func() {
+		// p.logger.Info("Sending message")
+		// defer p.logger.Info("Done Sending message")
 		p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
 	})
 }
 
-func (p *protoManager) submitOrPanic(f func()) {
-	err := p.pool.Submit(f)
-	if err != nil {
-		p.logger.Panic(err.Error())
+type babelRunnable struct {
+	f func()
+}
+
+func (r *babelRunnable) Run() {
+	r.f()
+}
+
+func (p *protoManager) submitOrWait(f func()) {
+	for {
+		err := p.pool.Execute(&babelRunnable{f: f})
+		if err != nil {
+			if err.Error() == threadpool.ErrQueueFull.Error() {
+				time.Sleep(5 * time.Millisecond)
+				continue
+			}
+			p.logger.Panic(err.Error())
+		}
+		return
 	}
 }
 
-func (p *protoManager) SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error {
-	p.submitOrPanic(func() {
-		originProto, ok := p.protocols.Load(origin)
-		if !ok {
-			p.logger.Panicf("Protocol %d not registered", origin)
-		}
+func (p *protoManager) SendRequest(r request.Request, origin, destination protocol.ID) errors.Error {
+	p.submitOrWait(func() {
+		p.logger.Info("Sending request")
+		defer p.logger.Info("Done sending request")
 		destProto, ok := p.protocols.Load(destination)
 		if !ok {
 			p.logger.Panicf("Protocol %d not registered", origin)
 		}
-		respChan := destProto.(protocolValueType).DeliverRequest(request)
-		reply := <-respChan
-		if reply != nil {
-			originProto.(protocolValueType).DeliverRequestReply(reply)
-		}
+		destProto.(protocolValueType).DeliverRequest(r, origin)
 	})
 	return nil
 }
 
-func (p *protoManager) SendNotification(notification notification.Notification) errors.Error {
-	p.submitOrPanic(func() {
-		p.notificationHub.AddNotification(notification)
+func (p *protoManager) SendRequestReply(r request.Reply, origin, destination protocol.ID) errors.Error {
+	p.submitOrWait(func() {
+		p.logger.Info("Sending request reply")
+		defer p.logger.Info("Done sending request reply")
+		destProto, ok := p.protocols.Load(destination)
+		if !ok {
+			p.logger.Panicf("Protocol %d not registered", origin)
+		}
+		destProto.(protocolValueType).DeliverRequestReply(r)
+	})
+	return nil
+}
+
+func (p *protoManager) SendNotification(n notification.Notification) errors.Error {
+	p.submitOrWait(func() {
+		// p.logger.Info("CancelTimer")
+		// defer p.logger.Info("Done CancelTimer")
+		p.notificationHub.AddNotification(n)
 	})
 	return nil
 }
@@ -267,44 +259,45 @@ func (p *protoManager) RegisteredProtos() []protocol.ID {
 
 func (p *protoManager) SendMessageSideStream(
 	toSend message.Message,
-	peer peer.Peer,
+	dest peer.Peer,
 	addr net.Addr,
 	sourceProtoID protocol.ID,
 	destProto protocol.ID,
 ) {
-	p.submitOrPanic(func() {
-		p.streamManager.SendMessageSideStream(toSend, peer, addr, sourceProtoID, destProto)
-	})
+	go p.streamManager.SendMessageSideStream(toSend, dest, addr, sourceProtoID, destProto)
 }
 
 func (p *protoManager) Dial(dialingProto protocol.ID, peer peer.Peer, toDial net.Addr) errors.Error {
-	p.logger.Infof("Dialing new node %s", toDial.String())
+	// p.logger.Infof("Dialing new node %s", toDial.String())
 	go p.streamManager.DialAndNotify(dialingProto, peer, toDial)
 	return nil
 }
 
 func (p *protoManager) MessageDelivered(sendingProto protocol.ID, msg message.Message, peer peer.Peer) {
-	p.submitOrPanic(func() {
+	p.submitOrWait(func() {
 		callerProto, ok := p.protocols.Load(sendingProto)
 		if !ok {
-			p.logger.Panicf("Protocol %d not registered", sendingProto)
+			p.logger.Panicf("Protocol %d not registered, message type: %s, contents:%+v", sendingProto, reflect.TypeOf(msg), msg)
 		}
 		callerProto.(protocolValueType).MessageDelivered(msg, peer)
 	})
 }
 
 func (p *protoManager) MessageDeliveryErr(sendingProto protocol.ID, msg message.Message, peer peer.Peer, err errors.Error) {
-	p.submitOrPanic(func() {
+	p.submitOrWait(func() {
 		callerProto, ok := p.protocols.Load(sendingProto)
 		if !ok {
-			p.logger.Panicf("Protocol %d not registered", sendingProto)
+			p.logger.Panicf("Protocol %d not registered, message type: %s, contents:%+v", sendingProto, reflect.TypeOf(msg), msg)
+
 		}
 		callerProto.(protocolValueType).MessageDeliveryErr(msg, peer, err)
 	})
 }
 
 func (p *protoManager) Disconnect(source protocol.ID, toDc peer.Peer) {
-	p.submitOrPanic(func() {
+	p.submitOrWait(func() {
+		// p.logger.Info("Disconnecting from ", toDc.String())
+		// defer p.logger.Info("Done disconnecting from ", toDc.String())
 		p.streamManager.Disconnect(source, toDc)
 	})
 }
@@ -323,25 +316,29 @@ func (p *protoManager) InConnRequested(targetProto protocol.ID, dialer peer.Peer
 // protoMsg.DestProtos
 
 func (p *protoManager) DeliverTimer(t timer.Timer, destProto protocol.ID) {
-	p.submitOrPanic(func() {
+	p.submitOrWait(func() {
+		// p.logger.Info("DeliverTimer")
+		// defer p.logger.Info("Done DeliverTimer")
 		if proto, ok := p.protocols.Load(destProto); ok {
 			proto.(protocolValueType).DeliverTimer(t)
 		}
 	})
 }
 
-func (p *protoManager) DeliverMessage(sender peer.Peer, message message.Message, destProto protocol.ID) {
-	p.submitOrPanic(func() {
+func (p *protoManager) DeliverMessage(sender peer.Peer, msg message.Message, destProto protocol.ID) {
+	p.submitOrWait(func() {
+		// p.logger.Info("DeliverMessage")
+		// defer p.logger.Info("Done DeliverMessage")
 		if toNotify, ok := p.protocols.Load(destProto); ok {
-			toNotify.(protocolValueType).DeliverMessage(sender, message)
+			toNotify.(protocolValueType).DeliverMessage(sender, msg)
 		} else {
-			p.logger.Panicf("Ignored message: %+v", message)
+			p.logger.Errorf("Protocol %d not registered, ignoring message type: %s, contents:%+v", destProto, reflect.TypeOf(msg), msg)
 		}
 	})
 }
 
 func (p *protoManager) DialError(sourceProto protocol.ID, dialedPeer peer.Peer) {
-	p.submitOrPanic(func() {
+	p.submitOrWait(func() {
 		callerProto, ok := p.protocols.Load(sourceProto)
 		if !ok {
 			p.logger.Panicf("Proto %d not found", sourceProto)
@@ -357,7 +354,7 @@ func (p *protoManager) DialSuccess(dialerProto protocol.ID, dialedPeer peer.Peer
 }
 
 func (p *protoManager) OutTransportFailure(dialerProto protocol.ID, peer peer.Peer) {
-	p.submitOrPanic(func() {
+	p.submitOrWait(func() {
 		p.logger.Warn("Handling transport failure from ", peer.String())
 		proto, _ := p.protocols.Load(dialerProto)
 		proto.(protocolValueType).OutConnDown(peer)
@@ -426,7 +423,12 @@ func (p *protoManager) setupLoggers() {
 }
 
 func (p *protoManager) CancelTimer(timerID int) errors.Error {
-	return p.tq.CancelTimer(timerID)
+	p.submitOrWait(func() {
+		// p.logger.Info("Sending notification")
+		// defer p.logger.Info("Done sending notification")
+		p.tq.CancelTimer(timerID)
+	})
+	return nil
 }
 
 func (p *protoManager) RegisterTimer(origin protocol.ID, timer timer.Timer) int {
@@ -435,7 +437,9 @@ func (p *protoManager) RegisterTimer(origin protocol.ID, timer timer.Timer) int 
 
 func (p *protoManager) RegisterPeriodicTimer(origin protocol.ID, timer timer.Timer, triggerAtTimeZero bool) int {
 	if triggerAtTimeZero {
-		defer p.submitOrPanic(func() { p.DeliverTimer(timer, origin) })
+		// p.logger.Info("Setting periodic timer")
+		// defer p.logger.Info("Setting periodic timer")
+		defer p.submitOrWait(func() { p.DeliverTimer(timer, origin) })
 	}
 	return p.tq.AddPeriodicTimer(timer, origin)
 }
@@ -445,6 +449,7 @@ func (p *protoManager) StartAsync() {
 }
 
 func (p *protoManager) StartSync() {
+
 	// p.logger.Infof("Starting Sync...")
 	p.logger.Infof("Setting up loggers...")
 	p.setupLoggers()
@@ -471,5 +476,6 @@ func (p *protoManager) StartSync() {
 			return true
 		},
 	)
+
 	select {}
 }

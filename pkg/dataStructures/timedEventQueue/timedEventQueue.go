@@ -131,7 +131,6 @@ func (tq *timedEventQueue) run() {
 				heap.Init(tq.pq)
 				// tq.logger.Infof("Removed item %s successfully", req.key)
 				req.respChan <- true
-
 				break outer
 			}
 
@@ -140,10 +139,12 @@ func (tq *timedEventQueue) run() {
 
 		case <-nextItemTimer.C:
 			item := nextItem.Value.(Item)
-			if ok, nextDeadline := item.OnTrigger(); ok {
-				nextItem.Priority = nextDeadline.UnixNano()
-				reAdd(nextItem)
-			}
+			go func() {
+				if ok, nextDeadline := item.OnTrigger(); ok {
+					nextItem.Priority = nextDeadline.UnixNano()
+					tq.Add(item, *nextDeadline)
+				}
+			}()
 		}
 		nextItemTimer.Stop()
 	}

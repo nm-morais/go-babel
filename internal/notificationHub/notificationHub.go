@@ -33,12 +33,14 @@ func (hub *notificationHub) RemoveListener(id notification.ID, protoID protocol.
 	if !ok {
 		return
 	}
+
 	for idx, listener := range currListeners {
 		if listener.ID() == protoID {
 			currListeners[idx] = currListeners[len(currListeners)-1]
 			hub.listeners[id] = currListeners[:len(currListeners)-1]
 		}
 	}
+
 	if len(hub.listeners[id]) == 0 {
 		delete(hub.listeners, id)
 	}
@@ -52,9 +54,9 @@ func (hub *notificationHub) AddListener(id notification.ID, wrapperProtocol *int
 		hub.listeners[id] = []*internalProto.WrapperProtocol{wrapperProtocol}
 		return
 	}
+
 	currListeners = append(currListeners, wrapperProtocol)
 	hub.listeners[id] = currListeners
-
 }
 
 func (hub *notificationHub) AddNotification(n notification.Notification) {
@@ -64,6 +66,7 @@ func (hub *notificationHub) AddNotification(n notification.Notification) {
 	if !ok {
 		return
 	}
+
 	for _, listener := range currListeners {
 		listener.DeliverNotification(n)
 	}

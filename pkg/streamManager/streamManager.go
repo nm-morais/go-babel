@@ -20,7 +20,7 @@ type StreamManager interface {
 		sourceProtoID protocol.ID,
 		destProtos protocol.ID,
 	) errors.Error
-	SendMessage(toSend message.Message, peer peer.Peer, origin protocol.ID, destination protocol.ID, batch bool) errors.Error
+	SendMessage(toSend message.Message, peer peer.Peer, origin protocol.ID, destination protocol.ID, batch bool)
 	Disconnect(disconnectingProto protocol.ID, p peer.Peer)
 	Logger() *logrus.Logger
 }

@@ -27,6 +27,7 @@ type ProtocolManager interface {
 	MessageDelivered(sendingProto protocol.ID, msg message.Message, peer peer.Peer)
 	MessageDeliveryErr(sendingProto protocol.ID, msg message.Message, peer peer.Peer, err errors.Error)
 	SendRequest(request request.Request, origin protocol.ID, destination protocol.ID) errors.Error
+	SendRequestReply(request request.Reply, origin protocol.ID, destination protocol.ID) errors.Error
 	SendNotification(notification notification.Notification) errors.Error
 
 	RegisterListenAddr(addr net.Addr)

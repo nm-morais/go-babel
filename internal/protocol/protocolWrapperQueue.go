@@ -2,20 +2,23 @@ package frontend
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	// blockingqueue "github.com/nm-morais/go-babel/pkg/dataStructures/blockingQueue"
 	// blockingqueue "github.com/nm-morais/go-babel/pkg/dataStructures/blockingQueue"
-	"github.com/enriquebris/goconcurrentqueue"
+
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/handlers"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/nm-morais/go-babel/pkg/request"
 	"github.com/nm-morais/go-babel/pkg/timer"
 )
@@ -42,8 +45,8 @@ const (
 	outConnDownEvent
 )
 
-const ChannelSize = 100 // buffer 10 events in channel
-const QueueSize = 1024  // buffer 10 events in channel
+const ChannelSize = 100
+const QueueSize = 50_000
 
 type WrapperProtocol struct {
 	id              protocol.ID
@@ -57,12 +60,14 @@ type WrapperProtocol struct {
 	timerHandlers        map[timer.ID]handlers.TimerHandler
 
 	// event queue
-	eventQueue *goconcurrentqueue.FIFO
+	eventQueue chan *event
+
+	babel protocolManager.ProtocolManager
 }
 
-type reqWithReplyCHan struct {
-	req      request.Request
-	respChan chan request.Reply
+type reqWithOriginProto struct {
+	req         request.Request
+	originProto protocol.ID
 }
 
 type dialSuccessWithBoolReplyChan struct {
@@ -88,39 +93,43 @@ type inConnReqEventWithBoolReply struct {
 	respChan    chan bool
 }
 
-func NewWrapperProtocol(p protocol.Protocol) *WrapperProtocol {
+func NewWrapperProtocol(p protocol.Protocol, babel protocolManager.ProtocolManager) *WrapperProtocol {
 	wp := &WrapperProtocol{
-		id:              p.ID(),
-		wrappedProtocol: p,
-
+		id:                   p.ID(),
+		wrappedProtocol:      p,
 		notificationHandlers: make(map[notification.ID]handlers.NotificationHandler),
 		requestHandlers:      make(map[request.ID]handlers.RequestHandler),
 		messageHandlers:      make(map[message.ID]handlers.MessageHandler),
 		replyHandlers:        make(map[request.ID]handlers.ReplyHandler),
 		timerHandlers:        make(map[timer.ID]handlers.TimerHandler),
+		eventQueue:           make(chan *event, QueueSize),
+		babel:                babel,
 	}
-	newEventQueue := goconcurrentqueue.NewFIFO()
-	wp.eventQueue = newEventQueue
 
 	return wp
+}
+
+func (pw *WrapperProtocol) Enqueue(ev *event) {
+	select {
+	case pw.eventQueue <- ev:
+		return
+	case <-time.After(3 * time.Second):
+		pw.Logger().Panicf("Protocol is overloaded with too many events: %d", len(pw.eventQueue))
+	}
 }
 
 //  channel Deliverers
 
 func (pw *WrapperProtocol) DeliverRequestReply(reply request.Reply) {
-	if err := pw.eventQueue.Enqueue(NewEvent(requestReplyEvent, reply)); err != nil {
-		pw.Logger().Panic(err)
-	}
+	pw.Enqueue(NewEvent(requestReplyEvent, reply))
 }
 
 func (pw *WrapperProtocol) DeliverNotification(n notification.Notification) {
-	if err := pw.eventQueue.Enqueue(NewEvent(notificationEvent, n)); err != nil {
-		pw.Logger().Panic(err)
-	}
+	pw.Enqueue(NewEvent(notificationEvent, n))
 }
 
 func (pw *WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message) {
-	err := pw.eventQueue.Enqueue(
+	pw.Enqueue(
 		NewEvent(
 			messageEvent, messageWithPeer{
 				peer:    sender,
@@ -128,45 +137,35 @@ func (pw *WrapperProtocol) DeliverMessage(sender peer.Peer, msg message.Message)
 			},
 		),
 	)
-	if err != nil {
-		pw.Logger().Panic(err)
-	}
 }
 
 func (pw *WrapperProtocol) DeliverTimer(t timer.Timer) {
-	if err := pw.eventQueue.Enqueue(NewEvent(timerEvent, t)); err != nil {
-		pw.Logger().Panic(err)
-	}
+	pw.Enqueue(NewEvent(timerEvent, t))
 }
 
-func (pw *WrapperProtocol) DeliverRequest(req request.Request) <-chan request.Reply {
-	aux := reqWithReplyCHan{
-		req:      req,
-		respChan: make(chan request.Reply),
+func (pw *WrapperProtocol) DeliverRequest(req request.Request, originProto protocol.ID) {
+	aux := &reqWithOriginProto{
+		req:         req,
+		originProto: originProto,
 	}
-	if err := pw.eventQueue.Enqueue(NewEvent(requestEvent, aux)); err != nil {
-		pw.Logger().Panic(err)
-	}
-	return aux.respChan
+	pw.Enqueue(NewEvent(requestEvent, aux))
 }
 
 // network events
 
 func (pw *WrapperProtocol) MessageDelivered(m message.Message, p peer.Peer) {
-	if err := pw.eventQueue.Enqueue(
+	pw.Enqueue(
 		NewEvent(
 			messageDeliverySucessEvent, messageWithPeer{
 				peer:    p,
 				message: m,
 			},
 		),
-	); err != nil {
-		pw.Logger().Panic(err)
-	}
+	)
 }
 
 func (pw *WrapperProtocol) MessageDeliveryErr(m message.Message, p peer.Peer, err errors.Error) {
-	if err := pw.eventQueue.Enqueue(
+	pw.Enqueue(
 		NewEvent(
 			messageDeliveryFailureEvent, messageWithPeerAndErr{
 				peer:    p,
@@ -174,49 +173,37 @@ func (pw *WrapperProtocol) MessageDeliveryErr(m message.Message, p peer.Peer, er
 				err:     err,
 			},
 		),
-	); err != nil {
-		pw.Logger().Panic(err)
-	}
+	)
 }
 
 func (pw *WrapperProtocol) InConnRequested(dialerProto protocol.ID, p peer.Peer) bool {
-	event := inConnReqEventWithBoolReply{
+	event := &inConnReqEventWithBoolReply{
 		dialerProto: dialerProto,
 		peer:        p,
 		respChan:    make(chan bool),
 	}
-	if err := pw.eventQueue.Enqueue(NewEvent(inConnRequestedEvent, event)); err != nil {
-		pw.Logger().Panic(err)
-	}
-
+	pw.Enqueue(NewEvent(inConnRequestedEvent, event))
 	reply := <-event.respChan
 	return reply
 }
 
 func (pw *WrapperProtocol) DialSuccess(dialerProto protocol.ID, p peer.Peer) bool {
-	event := dialSuccessWithBoolReplyChan{
+	event := &dialSuccessWithBoolReplyChan{
 		dialingProto: dialerProto,
 		peer:         p,
 		respChan:     make(chan bool),
 	}
-	if err := pw.eventQueue.Enqueue(NewEvent(dialSuccessEvent, event)); err != nil {
-		pw.Logger().Panic(err)
-	}
-
+	pw.Enqueue(NewEvent(dialSuccessEvent, event))
 	reply := <-event.respChan
 	return reply
 }
 
 func (pw *WrapperProtocol) DialFailed(p peer.Peer) {
-	if err := pw.eventQueue.Enqueue(NewEvent(dialFailedEvent, p)); err != nil {
-		pw.Logger().Panic(err)
-	}
+	pw.Enqueue(NewEvent(dialFailedEvent, p))
 }
 
 func (pw *WrapperProtocol) OutConnDown(p peer.Peer) {
-	if err := pw.eventQueue.Enqueue(NewEvent(outConnDownEvent, p)); err != nil {
-		pw.Logger().Panic(err)
-	}
+	pw.Enqueue(NewEvent(outConnDownEvent, p))
 }
 
 func (pw *WrapperProtocol) ID() protocol.ID {
@@ -224,8 +211,8 @@ func (pw *WrapperProtocol) ID() protocol.ID {
 }
 
 func (pw *WrapperProtocol) Start() {
-	pw.wrappedProtocol.Start()
 	go pw.handleChannels()
+	pw.wrappedProtocol.Start()
 }
 
 func (pw *WrapperProtocol) Init() {
@@ -235,26 +222,33 @@ func (pw *WrapperProtocol) Init() {
 // channel handler
 
 func (pw *WrapperProtocol) handleChannels() {
+	var nrEvents int64 = 0
+
 	go func() {
 		for range time.NewTicker(5 * time.Second).C {
-			pw.Logger().Infof("Nr events in queue: %d", pw.eventQueue.GetLen())
+			pw.Logger().Infof("Nr routines: %d ,Nr events in queue: %d, nrProcessedEvents: %d", runtime.NumGoroutine(),
+				len(pw.eventQueue), atomic.LoadInt64(&nrEvents))
 		}
 	}()
 
-	for {
-		nextEventInterface, err := pw.eventQueue.DequeueOrWaitForNextElement()
-		if err != nil {
-			pw.Logger().Panic(err)
-		}
-		nextEvent := nextEventInterface.(*event)
+	for nextEvent := range pw.eventQueue {
+		atomic.AddInt64(&nrEvents, 1)
 
 		switch nextEvent.eventype {
 		case inConnRequestedEvent:
-			event := nextEvent.eventContent.(inConnReqEventWithBoolReply)
-			event.respChan <- pw.wrappedProtocol.InConnRequested(event.dialerProto, event.peer)
+			event := nextEvent.eventContent.(*inConnReqEventWithBoolReply)
+			ok := pw.wrappedProtocol.InConnRequested(event.dialerProto, event.peer)
+
+			go func(ev *inConnReqEventWithBoolReply, ok bool) {
+				ev.respChan <- ok
+			}(event, ok)
 		case dialSuccessEvent:
-			event := nextEvent.eventContent.(dialSuccessWithBoolReplyChan)
-			event.respChan <- pw.wrappedProtocol.DialSuccess(event.dialingProto, event.peer)
+			event := nextEvent.eventContent.(*dialSuccessWithBoolReplyChan)
+			ok := pw.wrappedProtocol.DialSuccess(event.dialingProto, event.peer)
+
+			go func(ev *dialSuccessWithBoolReplyChan, ok bool) {
+				ev.respChan <- ok
+			}(event, ok)
 		case dialFailedEvent:
 			pw.wrappedProtocol.DialFailed(nextEvent.eventContent.(peer.Peer))
 		case outConnDownEvent:
@@ -266,8 +260,11 @@ func (pw *WrapperProtocol) handleChannels() {
 			event := nextEvent.eventContent.(messageWithPeerAndErr)
 			pw.wrappedProtocol.MessageDeliveryErr(event.message, event.peer, event.err)
 		case requestEvent:
-			event := nextEvent.eventContent.(reqWithReplyCHan)
-			event.respChan <- pw.handleRequest(event.req)
+			event := nextEvent.eventContent.(*reqWithOriginProto)
+			reply := pw.handleRequest(event.req)
+			if reply != nil {
+				go pw.babel.SendRequestReply(reply, pw.ID(), event.originProto)
+			}
 		case requestReplyEvent:
 			pw.handleReply(nextEvent.eventContent.(request.Reply))
 		case timerEvent:
@@ -290,6 +287,7 @@ func (pw *WrapperProtocol) handleNotification(n notification.Notification) {
 	if !ok {
 		pw.Logger().Panic("notification handler not found")
 	}
+
 	handler(n)
 }
 
@@ -298,6 +296,7 @@ func (pw *WrapperProtocol) handleTimer(t timer.Timer) {
 	if !ok {
 		pw.Logger().Panic("timer handler not found")
 	}
+
 	handler(t)
 }
 
@@ -425,5 +424,4 @@ func NewEvent(et eventType, content interface{}) *event {
 		eventype:     et,
 		eventContent: content,
 	}
-
 }
