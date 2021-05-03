@@ -1,0 +1,7 @@
+.git/
+*.zip
+stats/
+.idea
+.vscode
+*.MD
+*.txt
