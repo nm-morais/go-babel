@@ -3,6 +3,7 @@ package frontend
 import (
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -212,7 +213,6 @@ func (pw *WrapperProtocol) ID() protocol.ID {
 
 func (pw *WrapperProtocol) Start() {
 	go pw.handleChannels()
-	pw.wrappedProtocol.Start()
 }
 
 func (pw *WrapperProtocol) Init() {
@@ -224,13 +224,19 @@ func (pw *WrapperProtocol) Init() {
 func (pw *WrapperProtocol) handleChannels() {
 	var nrEvents int64 = 0
 
+	defer func() {
+		if x := recover(); x != nil {
+			pw.Logger().Panicf("Panic in run loop: %v, STACK: %s", x, string(debug.Stack()))
+		}
+	}()
+
 	go func() {
 		for range time.NewTicker(5 * time.Second).C {
 			pw.Logger().Infof("Nr routines: %d ,Nr events in queue: %d, nrProcessedEvents: %d", runtime.NumGoroutine(),
 				len(pw.eventQueue), atomic.LoadInt64(&nrEvents))
 		}
 	}()
-
+	pw.wrappedProtocol.Start()
 	for nextEvent := range pw.eventQueue {
 		atomic.AddInt64(&nrEvents, 1)
 

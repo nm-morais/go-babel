@@ -21,6 +21,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
+	"github.com/nm-morais/go-babel/pkg/streamManager"
 	log "github.com/sirupsen/logrus"
 	"github.com/smallnest/goframe"
 )
@@ -30,6 +31,7 @@ const (
 )
 
 var (
+	ErrConnectionClosed        = fmt.Errorf("connection closed")
 	streamManagerEncoderConfig = goframe.EncoderConfig{
 		ByteOrder:                       binary.BigEndian,
 		LengthFieldLength:               4,
@@ -66,6 +68,17 @@ type babelStreamManager struct {
 	logger             *log.Logger
 }
 
+type batch struct {
+	mu   *sync.Mutex
+	size int
+	msgs []*msgBytesWithCallback
+}
+
+type msgBytesWithCallback struct {
+	msgBytes []byte
+	Callback func(error)
+}
+
 type outboundTransport struct {
 	k    int
 	Addr net.Addr
@@ -73,22 +86,17 @@ type outboundTransport struct {
 	Dialed   chan interface{}
 	DialErr  chan interface{}
 	Finished chan interface{}
+	writers  *sync.WaitGroup
+	ToWrite  chan []*msgBytesWithCallback
 
-	conn   goframe.FrameConn
-	connMU *sync.Mutex
+	conn goframe.FrameConn
 
 	targetPeer  peer.Peer
 	originProto protocol.ID
-
-	lastFlush     time.Time
-	batchMessages []struct {
-		originProto protocol.ID
-		msg         message.Message
-	}
-	batchBytes []byte
-	batchMU    sync.Mutex
-	babel      protocolManager.ProtocolManager
-	sm         *babelStreamManager
+	batch       *batch
+	babel       protocolManager.ProtocolManager
+	sm          *babelStreamManager
+	closeOnce   *sync.Once
 }
 
 func (ot *outboundTransport) ID() string {
@@ -100,51 +108,93 @@ func (ot *outboundTransport) OnTrigger() (reAdd bool, nextDeadline *time.Time) {
 	case <-ot.Finished:
 		return false, nil
 	default:
-		if ot.flushBatch() {
-			nextDeadline := time.Now().Add(ot.sm.conf.BatchTimeout)
-			return true, &nextDeadline
-		}
-		return false, nil
+		ot.batch.mu.Lock()
+		defer ot.batch.mu.Unlock()
+		ot.flushBatch()
+		nextDeadline := time.Now().Add(ot.sm.conf.BatchTimeout)
+		return true, &nextDeadline
 	}
 }
 
-func (ot *outboundTransport) flushBatch() (reAdd bool) {
-	ot.batchMU.Lock()
-	defer ot.batchMU.Unlock()
-	if time.Since(ot.lastFlush) > ot.sm.conf.BatchTimeout && len(ot.batchBytes) < ot.sm.conf.BatchMaxSizeBytes {
-		return true
-	}
-	ot.connMU.Lock()
-	err := ot.conn.WriteFrame(ot.batchBytes)
-	ot.connMU.Unlock()
-	if err != nil {
-		for _, msgGeneric := range ot.batchMessages {
-			ot.babel.MessageDeliveryErr(msgGeneric.originProto, msgGeneric.msg, ot.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
+func (ot *outboundTransport) flushBatch() {
+	defer func() {
+		if x := recover(); x != nil {
+			ot.sm.logger.Panicf("Panic in flush batch: %v, STACK: %s", x, string(debug.Stack()))
 		}
-		ot.batchBytes = make([]byte, 0, ot.sm.conf.BatchMaxSizeBytes)
-		ot.batchMessages = make([]struct {
-			originProto uint16
-			msg         message.Message
-		}, 0)
-		if _, ok := ot.sm.outboundTransports.LoadAndDelete(GetKeyForConn(ot.originProto, ot.targetPeer)); ok {
-			defer ot.close()
-		}
+	}()
+	ot.sm.logger.Infof("Flushing batch...")
+	if ot.batch.msgs != nil {
+		ot.sendMessagesToChan(ot.batch.msgs...)
+		ot.batch.msgs = nil
+		ot.batch.size = 0
 	}
-	// sm.logger.Infof("delivered batch to %s successfully", outboundStream.targetPeer.String())
-	for _, msgGeneric := range ot.batchMessages {
-		// sm.logger.Infof("Message %d of type %s in batch sent to %s", idx, reflect.TypeOf(msgGeneric.msg), outboundStream.targetPeer.String())
-		ot.babel.MessageDelivered(msgGeneric.originProto, msgGeneric.msg, ot.targetPeer)
-		ot.sm.addMsgSent(msgGeneric.originProto)
-	}
-	ot.batchBytes = make([]byte, 0, ot.sm.conf.BatchMaxSizeBytes)
-	ot.batchMessages = make([]struct {
-		originProto uint16
-		msg         message.Message
-	}, 0)
-	return true
 }
 
-func (ot *outboundTransport) sendMessage(originProto, destProto protocol.ID, toSend message.Message, dest peer.Peer, batch bool) error {
+func (ot *outboundTransport) sendMessagesToChan(messages ...*msgBytesWithCallback) {
+	ot.writers.Add(1)
+	defer ot.writers.Done()
+	select {
+	case <-ot.Finished:
+		for _, msg := range messages {
+			msg.Callback(ErrConnectionClosed)
+		}
+	case ot.ToWrite <- messages:
+	}
+}
+
+func (ot *outboundTransport) writeOutboundMessages() {
+	connError := false
+	sendToConn := func(msgs []*msgBytesWithCallback) error {
+		var toSend []byte = nil
+		for _, p := range msgs {
+			toSend = append(toSend, p.msgBytes...)
+		}
+		err := ot.conn.WriteFrame(toSend)
+		for _, cb := range msgs {
+			go cb.Callback(err)
+		}
+		if err != nil {
+			ot.sm.logger.Errorf("Out connection got unexpected error: %s", err.Error())
+			connError = true
+		}
+		return err
+	}
+
+	defer func() {
+		for msgs := range ot.ToWrite {
+			if !connError {
+				sendToConn(msgs)
+			} else {
+				for _, cb := range msgs {
+					cb.Callback(ErrConnectionClosed)
+				}
+			}
+		}
+		ot.close(true)
+	}()
+
+	for {
+		select {
+		case <-ot.Finished:
+			return
+		case packet, ok := <-ot.ToWrite:
+			if !ok {
+				break
+			}
+			err := sendToConn(packet)
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (ot *outboundTransport) sendMessage(originProto, destProto protocol.ID, toSend message.Message, dest peer.Peer, batch bool) {
+	defer func() {
+		if x := recover(); x != nil {
+			ot.sm.logger.Panicf("Panic in sendMessage: %v, STACK: %s", x, string(debug.Stack()))
+		}
+	}()
 	select {
 	case <-ot.DialErr:
 		ot.sm.babel.MessageDeliveryErr(originProto, toSend, dest, errors.NonFatalError(500, "dial failed", streamManagerCaller))
@@ -152,7 +202,6 @@ func (ot *outboundTransport) sendMessage(originProto, destProto protocol.ID, toS
 		ot.sm.babel.MessageDeliveryErr(originProto, toSend, dest, errors.NonFatalError(500, "stream finished", streamManagerCaller))
 	case <-ot.Dialed:
 		internalMsgBytes, _ := ot.sm.babel.SerializationManager().Serialize(toSend)
-
 		msgBytes := internalMsg.NewAppMessageWrapper(
 			toSend.Type(),
 			originProto,
@@ -161,59 +210,62 @@ func (ot *outboundTransport) sendMessage(originProto, destProto protocol.ID, toS
 			internalMsgBytes,
 		).Serialize()
 		if batch {
-			ot.batchMU.Lock()
-			defer ot.batchMU.Unlock()
-			ot.batchMessages = append(ot.batchMessages, struct {
-				originProto uint16
-				msg         message.Message
-			}{
-				originProto: originProto,
-				msg:         toSend,
-			})
 			// ot.sm.logger.Infof("Added message of type %s to batch to %s", reflect.TypeOf(toSend), dest.String())
-			ot.batchBytes = append(ot.batchBytes, msgBytes...)
-			batchSize := len(ot.batchBytes)
-			if batchSize > ot.sm.conf.BatchMaxSizeBytes {
-				go ot.flushBatch()
+			ot.batch.mu.Lock()
+			defer ot.batch.mu.Unlock()
+			if ot.batch.size+len(msgBytes) >= ot.sm.conf.BatchMaxSizeBytes {
+				ot.flushBatch()
 			}
+			ot.batch.msgs = append(ot.batch.msgs, &msgBytesWithCallback{
+				msgBytes: msgBytes,
+				Callback: func(err error) {
+					ot.messageCallback(err, toSend, originProto)
+				},
+			})
+			ot.batch.size += len(msgBytes)
+		} else {
+			ot.sendMessagesToChan(&msgBytesWithCallback{
+				msgBytes: msgBytes,
+				Callback: func(err error) {
+					ot.messageCallback(err, toSend, originProto)
+				},
+			})
 		}
-
-		ot.connMU.Lock()
-		err := ot.conn.WriteFrame(msgBytes)
-		ot.connMU.Unlock()
-
-		if err != nil {
-			if _, ok := ot.sm.outboundTransports.LoadAndDelete(GetKeyForConn(ot.originProto, ot.targetPeer)); ok {
-				defer ot.close()
-			}
-		}
-		ot.sm.babel.MessageDelivered(originProto, toSend, dest)
-		ot.sm.addMsgSent(originProto)
 	}
-	return nil
 }
 
-func (ot *outboundTransport) close() {
-	ot.connMU.Lock()
-	ot.batchMU.Lock()
-	defer ot.connMU.Unlock()
-	defer ot.batchMU.Unlock()
-	for _, msgGeneric := range ot.batchMessages {
-		ot.sm.babel.MessageDeliveryErr(msgGeneric.originProto,
-			msgGeneric.msg,
-			ot.targetPeer,
-			errors.NonFatalError(500, "disconnected from peer", streamManagerCaller))
+func (ot *outboundTransport) messageCallback(err error, msg message.Message, originProto protocol.ID) {
+	if err != nil {
+		ot.sm.babel.MessageDeliveryErr(originProto, msg, ot.targetPeer, errors.NonFatalError(500, err.Error(), streamManagerCaller))
+	} else {
+		ot.sm.babel.MessageDelivered(originProto, msg, ot.targetPeer)
+		ot.sm.addMsgSent(originProto)
 	}
-	ot.batchBytes = nil
-	ot.batchMessages = nil
-	select {
-	case <-ot.Finished:
-	default:
-		close(ot.Finished)
-		ot.sm.closeConn(ot.conn)
-		ot.sm.babel.OutTransportFailure(ot.originProto, ot.targetPeer)
-		ot.sm.teq.Remove(ot.ID())
-	}
+}
+
+func (ot *outboundTransport) close(notifyProto bool) {
+	ot.closeOnce.Do(func() {
+		ot.batch.mu.Lock()
+		defer ot.batch.mu.Unlock()
+		for _, msgGeneric := range ot.batch.msgs {
+			msgGeneric.Callback(fmt.Errorf("disconnected from peer"))
+		}
+		ot.batch.msgs = nil
+		ot.batch.size = 0
+		select {
+		case <-ot.Finished:
+		default:
+			close(ot.Finished)
+			ot.writers.Wait()
+			ot.sm.closeConn(ot.conn)
+			close(ot.ToWrite)
+			if notifyProto {
+				ot.sm.babel.OutTransportFailure(ot.originProto, ot.targetPeer)
+			}
+			ot.sm.teq.Remove(ot.ID())
+			ot.sm.outboundTransports.Delete(ot.targetPeer.String())
+		}
+	})
 }
 
 const (
@@ -223,7 +275,7 @@ const (
 
 const streamManagerCaller = "StreamManager"
 
-func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerConf) *babelStreamManager {
+func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerConf) streamManager.StreamManager {
 	logger := logs.NewLogger(streamManagerCaller)
 
 	sm := &babelStreamManager{
@@ -295,7 +347,6 @@ func (sm *babelStreamManager) SendMessageSideStream(
 		defer tcpStream.Close()
 		// conn := gev.
 		frameBasedConn := goframe.NewLengthFieldBasedFrameConn(streamManagerEncoderConfig, streamManagerDecoderConfig, tcpStream)
-
 		hErr := sm.sendHandshakeMessage(frameBasedConn, sourceProtoID, TemporaryTunnel)
 		if hErr != nil {
 			sm.babel.MessageDeliveryErr(sourceProtoID, toSend, peer, hErr)
@@ -396,9 +447,8 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 			if err != nil {
 				sm.logger.Panic(err)
 			}
-			close(done)
-
 			sm.udpConn = packetConn
+			close(done)
 			for {
 				msgBytes := make([]byte, MaxUDPMsgSize)
 				n, _, err := packetConn.ReadFrom(msgBytes)
@@ -436,28 +486,24 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		Dialed:      make(chan interface{}),
 		DialErr:     make(chan interface{}),
 		Finished:    make(chan interface{}),
+		writers:     &sync.WaitGroup{},
+		ToWrite:     make(chan []*msgBytesWithCallback, 1024),
 		conn:        nil,
-		connMU:      &sync.Mutex{},
 		targetPeer:  toDial,
 		originProto: dialingProto,
-		lastFlush:   time.Time{},
-		batchMessages: make([]struct {
-			originProto uint16
-			msg         message.Message
-		}, 0),
-		batchBytes: make([]byte, 0, sm.conf.BatchMaxSizeBytes),
-		batchMU:    sync.Mutex{},
-		babel:      sm.babel,
-		sm:         sm,
+		batch:       &batch{mu: &sync.Mutex{}, size: sm.conf.BatchMaxSizeBytes, msgs: nil},
+		babel:       sm.babel,
+		sm:          sm,
+		closeOnce:   &sync.Once{},
 	}
-	newOutboundTransport.connMU.Lock()
+	newOutboundTransport.writers.Add(1)
 	_, loaded := sm.outboundTransports.LoadOrStore(k, newOutboundTransport)
 	if loaded {
-		newOutboundTransport.connMU.Unlock()
 		sm.logger.Warnf("Stream to %s already existed", toDial.String())
 		return errors.NonFatalError(500, "connection already up", streamManagerCaller)
 	}
 	go func() {
+		defer newOutboundTransport.writers.Done()
 		defer func() {
 			if x := recover(); x != nil {
 				sm.logger.Panicf("run time PANIC: %v, STACK: %s", x, string(debug.Stack()))
@@ -465,7 +511,6 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 			}
 		}()
 		sm.logger.Infof("Dialing peer: %s", toDial.String())
-		defer newOutboundTransport.connMU.Unlock()
 		conn, err := net.DialTimeout(addr.Network(), addr.String(), sm.conf.DialTimeout)
 		if err != nil {
 			sm.logger.Error(err)
@@ -478,6 +523,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		case net.Conn:
 			frameBasedConn := goframe.NewLengthFieldBasedFrameConn(streamManagerEncoderConfig, streamManagerDecoderConfig, newStreamTyped)
 			newOutboundTransport.conn = frameBasedConn
+
 			herr := sm.sendHandshakeMessage(frameBasedConn, dialingProto, PermanentTunnel)
 			if herr != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), herr)
@@ -495,10 +541,14 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 				sm.outboundTransports.Delete(k)
 				return
 			}
+
 			close(newOutboundTransport.Dialed)
 			sm.logger.Infof("Dialed %s successfully", k)
 			sm.teq.Add(newOutboundTransport, time.Now().Add(sm.conf.BatchTimeout))
 			sm.logStreamManagerState()
+
+			go newOutboundTransport.writeOutboundMessages()
+
 		default:
 			sm.logger.Panic("Unsupported conn type")
 		}
@@ -516,7 +566,6 @@ func (sm *babelStreamManager) SendMessage(
 	defer func() {
 		if x := recover(); x != nil {
 			sm.logger.Panicf("run time PANIC: %v, STACK: %s", x, string(debug.Stack()))
-
 		}
 	}()
 	k := GetKeyForConn(origin, destPeer)
@@ -525,11 +574,7 @@ func (sm *babelStreamManager) SendMessage(
 		sm.babel.MessageDeliveryErr(origin, toSend, destPeer, errors.NonFatalError(404, "stream not found", streamManagerCaller))
 		return
 	}
-	err := outboundStreamInt.(*outboundTransport).sendMessage(origin, destination, toSend, destPeer, batch)
-	if err != nil {
-		outboundStreamInt.(*outboundTransport).close()
-	}
-	return
+	outboundStreamInt.(*outboundTransport).sendMessage(origin, destination, toSend, destPeer, batch)
 }
 
 func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.Peer) {
@@ -542,7 +587,7 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 	k := GetKeyForConn(disconnectingProto, p)
 	outboundStreamInt, loaded := sm.outboundTransports.LoadAndDelete(k)
 	if loaded {
-		outboundStreamInt.(*outboundTransport).close()
+		outboundStreamInt.(*outboundTransport).close(false)
 	}
 }
 
@@ -556,9 +601,7 @@ func (sm *babelStreamManager) handleInStream(mr goframe.FrameConn, newPeer peer.
 		newFrame, err := mr.ReadFrame()
 		if err != nil {
 			if err != io.EOF {
-				logger.Errorf("Read routine got %s:", err.Error())
-			} else {
-				logger.Error("Read routine got EOF")
+				logger.Errorf("Read routine got unusual error: %s", err.Error())
 			}
 			return
 		}
@@ -600,15 +643,17 @@ func (sm *babelStreamManager) handleTmpStream(newPeer peer.Peer, c goframe.Frame
 	}
 
 	//sm.logger.Info("Reading from tmp stream")
-	msgBytes, err := c.ReadFrame()
-	if err != nil {
-		sm.logger.Errorf("Error reading in tmp stream: %s", err.Error())
-		return
-	}
+	msgBytes, connErr := c.ReadFrame()
 	msgWrapper := &internalMsg.AppMessageWrapper{}
-	_, err = msgWrapper.Deserialize(msgBytes)
-	if err != nil {
-		sm.logger.Errorf("Error deserializing message in tmp stream: %s", err.Error())
+	if len(msgBytes) > 0 {
+		_, err := msgWrapper.Deserialize(msgBytes)
+		if err != nil {
+			sm.logger.Errorf("Error deserializing message in tmp stream: %s", err.Error())
+			return
+		}
+	}
+	if connErr != nil {
+		sm.logger.Errorf("Error reading in tmp stream: %s", connErr.Error())
 		return
 	}
 	//sm.logger.Info("Done reading from tmp stream")

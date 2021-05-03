@@ -33,8 +33,8 @@ func NewTimerQueue(protoManager protocolManager.ProtocolManager) TimerQueue {
 	logger := logs.NewLogger(timerQueueCaller)
 	tq := &timerQueueImpl{
 		babel:  protoManager,
-		logger: logger,
 		teq:    timerQueue.NewTimedEventQueue(logger),
+		logger: logger,
 	}
 	return tq
 }
