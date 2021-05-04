@@ -207,17 +207,18 @@ func (p *protoManager) submitOrWait(f func()) {
 	// nrRetries := 5
 	// for i := 0; i < 5; i++ {
 	// err := p.pool.Execute(&babelRunnable{f: f})
-	err := p.pool.Submit(f)
-	if err != nil {
-		// if err.Error() == threadpool.ErrQueueFull.Error() {
-		// 	time.Sleep(15 * time.Millisecond)
-		// 	continue
-		// }
-		p.logger.Panic(err.Error())
-	}
+	// err := p.pool.Submit(f)
+	// if err != nil {
+	// if err.Error() == threadpool.ErrQueueFull.Error() {
+	// 	time.Sleep(15 * time.Millisecond)
+	// 	continue
+	// }
+	// p.logger.Panic(err.Error())
+	// }
 	// return
 	// }
 	// p.logger.Panicf("Failed to submit task after %d attempts", nrRetries)
+	go f()
 }
 
 func (p *protoManager) SendRequest(r request.Request, origin, destination protocol.ID) errors.Error {
