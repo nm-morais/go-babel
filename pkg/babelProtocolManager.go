@@ -24,7 +24,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/serializationManager"
 	"github.com/nm-morais/go-babel/pkg/streamManager"
 	"github.com/nm-morais/go-babel/pkg/timer"
-	"github.com/panjf2000/ants"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -42,7 +41,7 @@ type Config struct {
 type protocolValueType = *internalProto.WrapperProtocol
 
 type protoManager struct {
-	pool                 *ants.Pool
+	// pool                 *ants.Pool
 	nw                   nodeWatcher.NodeWatcher
 	tq                   TimerQueue
 	config               Config
@@ -65,11 +64,11 @@ func NewProtoManager(configs Config) *protoManager {
 		logger:               logs.NewLogger(ProtoManagerCaller),
 	}
 
-	pool, err := ants.NewPool(256)
-	if err != nil {
-		panic(err)
-	}
-	p.pool = pool
+	// pool, err := ants.NewPool(256)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// p.pool = pool
 	p.tq = NewTimerQueue(p)
 	p.streamManager = NewStreamManager(p, configs.SmConf)
 	return p
@@ -223,8 +222,8 @@ func (p *protoManager) submitOrWait(f func()) {
 
 func (p *protoManager) SendRequest(r request.Request, origin, destination protocol.ID) errors.Error {
 	// p.submitOrWait(func() {
-	p.logger.Info("Sending request")
-	defer p.logger.Info("Done sending request")
+	// p.logger.Info("Sending request")
+	// defer p.logger.Info("Done sending request")
 	destProto, ok := p.protocols.Load(destination)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
@@ -249,8 +248,8 @@ func (p *protoManager) SendRequestReply(r request.Reply, origin, destination pro
 
 func (p *protoManager) SendNotification(n notification.Notification) errors.Error {
 	p.submitOrWait(func() {
-		p.logger.Info("CancelTimer")
-		defer p.logger.Info("Done CancelTimer")
+		// p.logger.Info("CancelTimer")
+		// defer p.logger.Info("Done CancelTimer")
 		p.notificationHub.AddNotification(n)
 	})
 	return nil

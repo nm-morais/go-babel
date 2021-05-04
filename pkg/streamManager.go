@@ -83,11 +83,12 @@ type outboundTransport struct {
 	k    int
 	Addr net.Addr
 
-	Dialed   chan interface{}
-	DialErr  chan interface{}
-	Finished chan interface{}
-	writers  *sync.WaitGroup
-	ToWrite  chan []*msgBytesWithCallback
+	Dialed      chan interface{}
+	DialErr     chan interface{}
+	Finished    chan interface{}
+	doneWriting chan interface{}
+	writers     *sync.WaitGroup
+	ToWrite     chan []*msgBytesWithCallback
 
 	conn goframe.FrameConn
 
@@ -122,7 +123,7 @@ func (ot *outboundTransport) flushBatch() {
 			ot.sm.logger.Panicf("Panic in flush batch: %v, STACK: %s", x, string(debug.Stack()))
 		}
 	}()
-	ot.sm.logger.Infof("Flushing batch...")
+	// ot.sm.logger.Infof("Flushing batch...")
 	if ot.batch.msgs != nil {
 		ot.sendMessagesToChan(ot.batch.msgs...)
 		ot.batch.msgs = nil
@@ -143,7 +144,6 @@ func (ot *outboundTransport) sendMessagesToChan(messages ...*msgBytesWithCallbac
 }
 
 func (ot *outboundTransport) writeOutboundMessages() {
-	connError := false
 	sendToConn := func(msgs []*msgBytesWithCallback) error {
 		var toSend []byte = nil
 		for _, p := range msgs {
@@ -155,36 +155,36 @@ func (ot *outboundTransport) writeOutboundMessages() {
 		}
 		if err != nil {
 			ot.sm.logger.Errorf("Out connection got unexpected error: %s", err.Error())
-			connError = true
 		}
 		return err
 	}
 
 	defer func() {
-		for msgs := range ot.ToWrite {
-			if !connError {
+	outer:
+		for {
+			select {
+			case msgs := <-ot.ToWrite:
 				sendToConn(msgs)
-			} else {
-				for _, cb := range msgs {
-					cb.Callback(ErrConnectionClosed)
-				}
+			default:
+				break outer
 			}
 		}
+		close(ot.doneWriting)
 		ot.close(true)
 	}()
 
 	for {
 		select {
-		case <-ot.Finished:
-			return
 		case packet, ok := <-ot.ToWrite:
 			if !ok {
-				break
+				ot.sm.logger.Panic("Shouldn't happen")
 			}
 			err := sendToConn(packet)
 			if err != nil {
 				return
 			}
+		case <-ot.Finished:
+			return
 		}
 	}
 }
@@ -257,8 +257,9 @@ func (ot *outboundTransport) close(notifyProto bool) {
 		default:
 			close(ot.Finished)
 			ot.writers.Wait()
-			ot.sm.closeConn(ot.conn)
+			<-ot.doneWriting
 			close(ot.ToWrite)
+			ot.sm.closeConn(ot.conn)
 			if notifyProto {
 				ot.sm.babel.OutTransportFailure(ot.originProto, ot.targetPeer)
 			}
@@ -486,6 +487,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		Dialed:      make(chan interface{}),
 		DialErr:     make(chan interface{}),
 		Finished:    make(chan interface{}),
+		doneWriting: make(chan interface{}),
 		writers:     &sync.WaitGroup{},
 		ToWrite:     make(chan []*msgBytesWithCallback, 1024),
 		conn:        nil,
