@@ -46,7 +46,6 @@ const (
 	outConnDownEvent
 )
 
-const ChannelSize = 100
 const QueueSize = 50_000
 
 type WrapperProtocol struct {
@@ -181,9 +180,9 @@ func (pw *WrapperProtocol) InConnRequested(dialerProto protocol.ID, p peer.Peer)
 	event := &inConnReqEventWithBoolReply{
 		dialerProto: dialerProto,
 		peer:        p,
-		respChan:    make(chan bool),
+		respChan:    make(chan bool, 1),
 	}
-	pw.Enqueue(NewEvent(inConnRequestedEvent, event))
+	go pw.Enqueue(NewEvent(inConnRequestedEvent, event))
 	reply := <-event.respChan
 	return reply
 }
@@ -192,9 +191,9 @@ func (pw *WrapperProtocol) DialSuccess(dialerProto protocol.ID, p peer.Peer) boo
 	event := &dialSuccessWithBoolReplyChan{
 		dialingProto: dialerProto,
 		peer:         p,
-		respChan:     make(chan bool),
+		respChan:     make(chan bool, 1),
 	}
-	pw.Enqueue(NewEvent(dialSuccessEvent, event))
+	go pw.Enqueue(NewEvent(dialSuccessEvent, event))
 	reply := <-event.respChan
 	return reply
 }
@@ -239,32 +238,25 @@ func (pw *WrapperProtocol) handleChannels() {
 	pw.wrappedProtocol.Start()
 	for nextEvent := range pw.eventQueue {
 		atomic.AddInt64(&nrEvents, 1)
-
 		switch nextEvent.eventype {
 		case inConnRequestedEvent:
 			event := nextEvent.eventContent.(*inConnReqEventWithBoolReply)
 			ok := pw.wrappedProtocol.InConnRequested(event.dialerProto, event.peer)
-
-			go func(ev *inConnReqEventWithBoolReply, ok bool) {
-				ev.respChan <- ok
-			}(event, ok)
+			event.respChan <- ok
 		case dialSuccessEvent:
 			event := nextEvent.eventContent.(*dialSuccessWithBoolReplyChan)
 			ok := pw.wrappedProtocol.DialSuccess(event.dialingProto, event.peer)
-
-			go func(ev *dialSuccessWithBoolReplyChan, ok bool) {
-				ev.respChan <- ok
-			}(event, ok)
+			event.respChan <- ok
 		case dialFailedEvent:
 			pw.wrappedProtocol.DialFailed(nextEvent.eventContent.(peer.Peer))
 		case outConnDownEvent:
 			pw.wrappedProtocol.OutConnDown(nextEvent.eventContent.(peer.Peer))
 		case messageDeliverySucessEvent:
 			event := nextEvent.eventContent.(messageWithPeer)
-			pw.wrappedProtocol.MessageDelivered(event.message, event.peer)
+			go pw.wrappedProtocol.MessageDelivered(event.message, event.peer)
 		case messageDeliveryFailureEvent:
 			event := nextEvent.eventContent.(messageWithPeerAndErr)
-			pw.wrappedProtocol.MessageDeliveryErr(event.message, event.peer, event.err)
+			go pw.wrappedProtocol.MessageDeliveryErr(event.message, event.peer, event.err)
 		case requestEvent:
 			event := nextEvent.eventContent.(*reqWithOriginProto)
 			reply := pw.handleRequest(event.req)

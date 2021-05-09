@@ -174,10 +174,10 @@ func (p *protoManager) SendMessageAndDisconnect(
 	origin protocol.ID,
 	destination protocol.ID,
 ) {
-	p.submitOrWait(func() {
-		p.streamManager.SendMessage(toSend, destPeer, origin, destination, false)
-		p.Disconnect(origin, destPeer)
-	})
+	// p.submitOrWait(func() {
+	p.streamManager.SendMessage(toSend, destPeer, origin, destination, false)
+	go p.Disconnect(origin, destPeer)
+	// })
 }
 
 func (p *protoManager) SendMessage(
@@ -187,11 +187,11 @@ func (p *protoManager) SendMessage(
 	destination protocol.ID,
 	batch bool,
 ) {
-	p.submitOrWait(func() {
-		// p.logger.Info("Sending message")
-		// defer p.logger.Info("Done Sending message")
-		p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
-	})
+	// p.submitOrWait(func() {
+	// p.logger.Info("Sending message")
+	// defer p.logger.Info("Done Sending message")
+	p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
+	// })
 }
 
 // type babelRunnable struct {
@@ -217,7 +217,7 @@ func (p *protoManager) submitOrWait(f func()) {
 	// return
 	// }
 	// p.logger.Panicf("Failed to submit task after %d attempts", nrRetries)
-	go f()
+	f()
 }
 
 func (p *protoManager) SendRequest(r request.Request, origin, destination protocol.ID) errors.Error {
@@ -271,8 +271,7 @@ func (p *protoManager) SendMessageSideStream(
 
 func (p *protoManager) Dial(dialingProto protocol.ID, peer peer.Peer, toDial net.Addr) errors.Error {
 	// p.logger.Infof("Dialing new node %s", toDial.String())
-	go p.streamManager.DialAndNotify(dialingProto, peer, toDial)
-	return nil
+	return p.streamManager.DialAndNotify(dialingProto, peer, toDial)
 }
 
 func (p *protoManager) MessageDelivered(sendingProto protocol.ID, msg message.Message, peer peer.Peer) {
@@ -297,11 +296,11 @@ func (p *protoManager) MessageDeliveryErr(sendingProto protocol.ID, msg message.
 }
 
 func (p *protoManager) Disconnect(source protocol.ID, toDc peer.Peer) {
-	p.submitOrWait(func() {
-		// p.logger.Info("Disconnecting from ", toDc.String())
-		// defer p.logger.Info("Done disconnecting from ", toDc.String())
-		p.streamManager.Disconnect(source, toDc)
-	})
+	// p.submitOrWait(func() {
+	// p.logger.Info("Disconnecting from ", toDc.String())
+	// defer p.logger.Info("Done disconnecting from ", toDc.String())
+	go p.streamManager.Disconnect(source, toDc)
+	// })
 }
 
 func (p *protoManager) SelfPeer() peer.Peer {

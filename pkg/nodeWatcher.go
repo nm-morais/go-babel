@@ -21,6 +21,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/sirupsen/logrus"
 	"github.com/smallnest/goframe"
+	"golang.org/x/net/ipv4"
 )
 
 const nodeWatcherCaller = "NodeWatcher"
@@ -243,8 +244,11 @@ func (nm *NodeWatcherImpl) dialAndWatch(issuerProto protocol.ID, nodeInfo *NodeI
 		return
 	}
 
-	nodeInfo.peerConn = stream
+	if err := ipv4.NewConn(stream).SetTOS(0x28); err != nil {
+		nm.logger.Panic("Error: ", err.Error())
+	}
 
+	nodeInfo.peerConn = stream
 	switch stream := stream.(type) {
 	case *net.TCPConn:
 		go nm.handleTCPConnection(stream)
