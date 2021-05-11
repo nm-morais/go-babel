@@ -144,6 +144,7 @@ func (ot *outboundTransport) sendMessagesToChan(messages ...*msgBytesWithCallbac
 		for _, msg := range messages {
 			msg.Callback(ErrConnectionClosed)
 		}
+		ot.writers.Done()
 		return
 	default:
 	}
@@ -270,49 +271,51 @@ func (ot *outboundTransport) close(err error) {
 		ot.sm.outboundTransports.Delete(ot.targetPeer.String())
 		close(ot.Finished)
 		ot.logger.Trace("Closed finished chann")
-		ot.writersMux.Lock()
-		ot.writers.Wait()
-		ot.logger.Trace("Waited for writers")
-		ot.writersMux.Unlock()
-		ot.batch.mu.Lock()
-		defer ot.batch.mu.Unlock()
-		ot.logger.Trace("Flushing batch messages")
-		for _, msgGeneric := range ot.batch.msgs {
-			msgGeneric.Callback(ErrConnectionClosed)
-		}
-		ot.batch.msgs = nil
-		ot.batch.size = 0
-		ot.logger.Trace("Flushing messages in write chan")
 		go func() {
-			// wait for writer
-			<-ot.doneWriting
-			// drain write chan
-			sendErr := err
-			for {
-				select {
-				case msgBatch := <-ot.ToWrite:
-					if sendErr != nil {
-						sendErr = ot.writeToConn(msgBatch)
-					}
-					if sendErr != nil {
-						for _, msg := range msgBatch {
-							msg.Callback(sendErr)
-						}
-					}
-				default:
-					ot.sm.closeConn(ot.conn)
-					ot.logger.Info("Closing write chan")
-					close(ot.ToWrite)
-					return
-				}
+			ot.writersMux.Lock()
+			ot.writers.Wait()
+			ot.logger.Trace("Waited for writers")
+			ot.writersMux.Unlock()
+			ot.batch.mu.Lock()
+			defer ot.batch.mu.Unlock()
+			ot.logger.Trace("Flushing batch messages")
+			for _, msgGeneric := range ot.batch.msgs {
+				msgGeneric.Callback(ErrConnectionClosed)
 			}
+			ot.batch.msgs = nil
+			ot.batch.size = 0
+			ot.logger.Trace("Flushing messages in write chan")
+			go func() {
+				// wait for writer
+				<-ot.doneWriting
+				// drain write chan
+				sendErr := err
+				for {
+					select {
+					case msgBatch := <-ot.ToWrite:
+						if sendErr != nil {
+							sendErr = ot.writeToConn(msgBatch)
+						}
+						if sendErr != nil {
+							for _, msg := range msgBatch {
+								msg.Callback(sendErr)
+							}
+						}
+					default:
+						ot.sm.closeConn(ot.conn)
+						ot.logger.Info("Closing write chan")
+						close(ot.ToWrite)
+						return
+					}
+				}
+			}()
+			if err != nil {
+				ot.logger.Trace("Delivering OutTransportFailure")
+				ot.sm.babel.OutTransportFailure(ot.originProto, ot.targetPeer)
+			}
+			ot.logger.Trace("Removing from teq")
+			ot.sm.teq.Remove(ot.ID())
 		}()
-		if err != nil {
-			ot.logger.Trace("Delivering OutTransportFailure")
-			ot.sm.babel.OutTransportFailure(ot.originProto, ot.targetPeer)
-		}
-		ot.logger.Trace("Removing from teq")
-		ot.sm.teq.Remove(ot.ID())
 	})
 }
 
@@ -484,8 +487,8 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 					}
 
 					sm.logger.Infof("Accepted connection from %s successfully", remotePeer.String())
-					sm.logStreamManagerState()
 					sm.inboundTransports.Store(remotePeer.String(), newStream)
+					sm.logStreamManagerState()
 					sm.handleInStream(frameBasedConn, remotePeer)
 					sm.inboundTransports.Delete(remotePeer.String())
 				}()
@@ -647,6 +650,7 @@ func (sm *babelStreamManager) handleInStream(mr goframe.FrameConn, newPeer peer.
 
 	logger.Info("[ConnectionEvent] : Started handling peer stream")
 	defer logger.Info("[ConnectionEvent] : Done handling peer stream")
+	sm.logStreamManagerState()
 	carry := []byte{}
 	for {
 		newFrame, err := mr.ReadFrame()

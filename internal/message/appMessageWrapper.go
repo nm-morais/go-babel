@@ -10,7 +10,6 @@ import (
 )
 
 var ErrNotEnoughLen = errors.New("not enough length to deserialize")
-var appMessageWrapperSerializer = AppMessageWrapperSerializer{}
 
 type AppMessageWrapper struct {
 	Sender            peer.Peer

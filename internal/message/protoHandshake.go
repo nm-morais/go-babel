@@ -10,8 +10,6 @@ import (
 
 const HandshakeMessageID = 1
 
-var protoHandshakeMessageSerializer = AppMessageWrapperSerializer{}
-
 type ProtoHandshakeMessage struct {
 	Peer        peer.Peer
 	DialerProto protocol.ID

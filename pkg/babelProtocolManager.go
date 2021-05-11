@@ -24,6 +24,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/serializationManager"
 	"github.com/nm-morais/go-babel/pkg/streamManager"
 	"github.com/nm-morais/go-babel/pkg/timer"
+	"github.com/panjf2000/ants"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -52,16 +53,26 @@ type protoManager struct {
 	streamManager        streamManager.StreamManager
 	listenAddrs          []net.Addr
 	logger               *log.Logger
+	pool                 *ants.Pool
 }
 
 func NewProtoManager(configs Config) *protoManager {
 	p := &protoManager{
+		nw:                   nil,
+		tq:                   nil,
 		config:               configs,
 		notificationHub:      notificationHub.NewNotificationHub(),
 		serializationManager: serialization.NewSerializationManager(),
 		protocols:            &sync.Map{},
 		protoIds:             []protocol.ID{},
+		streamManager:        nil,
+		listenAddrs:          []net.Addr{},
 		logger:               logs.NewLogger(ProtoManagerCaller),
+		pool:                 nil,
+	}
+	pool, err := ants.NewPool(16)
+	if err != nil {
+		p.logger.Panic(err.Error())
 	}
 
 	// pool, err := ants.NewPool(256)
@@ -69,6 +80,7 @@ func NewProtoManager(configs Config) *protoManager {
 	// 	panic(err)
 	// }
 	// p.pool = pool
+	p.pool = pool
 	p.tq = NewTimerQueue(p)
 	p.streamManager = NewStreamManager(p, configs.SmConf)
 	return p
@@ -174,10 +186,10 @@ func (p *protoManager) SendMessageAndDisconnect(
 	origin protocol.ID,
 	destination protocol.ID,
 ) {
-	// p.submitOrWait(func() {
-	p.streamManager.SendMessage(toSend, destPeer, origin, destination, false)
-	go p.Disconnect(origin, destPeer)
-	// })
+	p.submitOrWait(func() {
+		p.streamManager.SendMessage(toSend, destPeer, origin, destination, false)
+		p.Disconnect(origin, destPeer)
+	})
 }
 
 func (p *protoManager) SendMessage(
@@ -187,11 +199,11 @@ func (p *protoManager) SendMessage(
 	destination protocol.ID,
 	batch bool,
 ) {
-	// p.submitOrWait(func() {
-	// p.logger.Info("Sending message")
-	// defer p.logger.Info("Done Sending message")
-	p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
-	// })
+	p.submitOrWait(func() {
+		// p.logger.Info("Sending message")
+		// defer p.logger.Info("Done Sending message")
+		p.streamManager.SendMessage(toSend, destPeer, origin, destination, batch)
+	})
 }
 
 // type babelRunnable struct {
@@ -203,21 +215,7 @@ func (p *protoManager) SendMessage(
 // }
 
 func (p *protoManager) submitOrWait(f func()) {
-	// nrRetries := 5
-	// for i := 0; i < 5; i++ {
-	// err := p.pool.Execute(&babelRunnable{f: f})
-	// err := p.pool.Submit(f)
-	// if err != nil {
-	// if err.Error() == threadpool.ErrQueueFull.Error() {
-	// 	time.Sleep(15 * time.Millisecond)
-	// 	continue
-	// }
-	// p.logger.Panic(err.Error())
-	// }
-	// return
-	// }
-	// p.logger.Panicf("Failed to submit task after %d attempts", nrRetries)
-	f()
+	p.pool.Submit(f)
 }
 
 func (p *protoManager) SendRequest(r request.Request, origin, destination protocol.ID) errors.Error {
@@ -235,8 +233,8 @@ func (p *protoManager) SendRequest(r request.Request, origin, destination protoc
 
 func (p *protoManager) SendRequestReply(r request.Reply, origin, destination protocol.ID) errors.Error {
 	// p.submitOrWait(func() {
-	p.logger.Info("Sending request reply")
-	defer p.logger.Info("Done sending request reply")
+	// p.logger.Info("Sending request reply")
+	// defer p.logger.Info("Done sending request reply")
 	destProto, ok := p.protocols.Load(destination)
 	if !ok {
 		p.logger.Panicf("Protocol %d not registered", origin)
@@ -299,7 +297,7 @@ func (p *protoManager) Disconnect(source protocol.ID, toDc peer.Peer) {
 	// p.submitOrWait(func() {
 	// p.logger.Info("Disconnecting from ", toDc.String())
 	// defer p.logger.Info("Done disconnecting from ", toDc.String())
-	go p.streamManager.Disconnect(source, toDc)
+	p.streamManager.Disconnect(source, toDc)
 	// })
 }
 
@@ -425,8 +423,8 @@ func (p *protoManager) setupLoggers() {
 
 func (p *protoManager) CancelTimer(timerID int) errors.Error {
 	p.submitOrWait(func() {
-		p.logger.Info("Sending notification")
-		defer p.logger.Info("Done sending notification")
+		// p.logger.Info("Sending notification")
+		// defer p.logger.Info("Done sending notification")
 		p.tq.CancelTimer(timerID)
 	})
 	return nil
