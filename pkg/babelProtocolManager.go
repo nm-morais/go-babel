@@ -70,7 +70,7 @@ func NewProtoManager(configs Config) *protoManager {
 		logger:               logs.NewLogger(ProtoManagerCaller),
 		pool:                 nil,
 	}
-	pool, err := ants.NewPool(16)
+	pool, err := ants.NewPool(8)
 	if err != nil {
 		p.logger.Panic(err.Error())
 	}
