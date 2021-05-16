@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -80,6 +81,15 @@ func (p *IPeer) Unmarshal(buf []byte) int {
 	p.ip = buf[0:4]
 	p.protosPort = binary.BigEndian.Uint16(buf[4:6])
 	p.analyticsPort = binary.BigEndian.Uint16(buf[6:8])
+	return 8
+}
+
+func (p *IPeer) UnmarshalFromBuf(buf *bytes.Buffer) int {
+	ipBytes := make([]byte, 4)
+	buf.Read(ipBytes)
+	p.ip = ipBytes
+	binary.Read(buf, binary.BigEndian, &p.protosPort)
+	binary.Read(buf, binary.BigEndian, &p.analyticsPort)
 	return 8
 }
 

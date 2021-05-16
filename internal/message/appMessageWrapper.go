@@ -12,13 +12,11 @@ import (
 var ErrNotEnoughLen = errors.New("not enough length to deserialize")
 
 type AppMessageWrapper struct {
-	Sender            peer.Peer
-	MessageID         message.ID
-	SourceProto       protocol.ID
-	DestProto         protocol.ID
-	LenWrappedBytes   uint32
-	WrappedMsgBytes   []byte
-	TotalMessageBytes int
+	Sender          peer.Peer
+	MessageID       message.ID
+	SourceProto     protocol.ID
+	DestProto       protocol.ID
+	WrappedMsgBytes []byte
 }
 
 func NewAppMessageWrapper(
@@ -29,13 +27,11 @@ func NewAppMessageWrapper(
 	wrappedMsgBytes []byte,
 ) *AppMessageWrapper {
 	return &AppMessageWrapper{
-		Sender:            sender,
-		MessageID:         mID,
-		SourceProto:       sourceProto,
-		DestProto:         destProto,
-		LenWrappedBytes:   uint32(len(wrappedMsgBytes)),
-		WrappedMsgBytes:   wrappedMsgBytes,
-		TotalMessageBytes: len(wrappedMsgBytes) + 18,
+		Sender:          sender,
+		MessageID:       mID,
+		SourceProto:     sourceProto,
+		DestProto:       destProto,
+		WrappedMsgBytes: wrappedMsgBytes,
 	}
 }
 
@@ -44,17 +40,44 @@ func NewAppMessageWrapper(
 type AppMessageWrapperSerializer struct{}
 
 func (wrapperMsg *AppMessageWrapper) Serialize() []byte {
-	buf := make([]byte, 10)
+	buf := make([]byte, 6)
 	binary.BigEndian.PutUint16(buf, wrapperMsg.MessageID)
 	binary.BigEndian.PutUint16(buf[2:], wrapperMsg.SourceProto)
 	binary.BigEndian.PutUint16(buf[4:], wrapperMsg.DestProto)
-	binary.BigEndian.PutUint32(buf[6:], uint32(len(wrapperMsg.WrappedMsgBytes)))
 	buf = append(buf, wrapperMsg.Sender.Marshal()...)
 	return append(buf, wrapperMsg.WrappedMsgBytes...)
 }
 
+// func (wrapperMsg *AppMessageWrapper) Deserialize(reader *bytes.Buffer) (int, error) {
+// 	if reader.Len() < 14 {
+// 		return 0, ErrNotEnoughLen
+// 	}
+
+// 	if err := binary.Read(reader, binary.BigEndian, &wrapperMsg.MessageID); err != nil {
+// 		return 0, err
+// 	}
+
+// 	if err := binary.Read(reader, binary.BigEndian, &wrapperMsg.SourceProto); err != nil {
+// 		return 0, err
+// 	}
+
+// 	if err := binary.Read(reader, binary.BigEndian, &wrapperMsg.DestProto); err != nil {
+// 		return 0, err
+// 	}
+
+// 	peerBytes := make([]byte, 8)
+// 	if _, err := reader.Read(peerBytes); err != nil {
+// 		return 0, err
+// 	}
+// 	tmp := &peer.IPeer{}
+// 	tmp.UnmarshalFromBuf(reader)
+// 	wrapperMsg.Sender = tmp
+// 	wrapperMsg.WrappedMsgBytes = reader.Bytes()
+// 	return len(wrapperMsg.WrappedMsgBytes) + 14, nil
+// }
+
 func (wrapperMsg *AppMessageWrapper) Deserialize(buf []byte) (curr int, err error) {
-	if len(buf) < 18 {
+	if len(buf) < 14 {
 		return 0, ErrNotEnoughLen
 	}
 	curr = 0
@@ -64,16 +87,10 @@ func (wrapperMsg *AppMessageWrapper) Deserialize(buf []byte) (curr int, err erro
 	curr += 2
 	wrapperMsg.DestProto = binary.BigEndian.Uint16(buf[curr:])
 	curr += 2
-	wrapperMsg.LenWrappedBytes = binary.BigEndian.Uint32(buf[curr : curr+4])
-	curr += 4
 	p := &peer.IPeer{}
 	curr += p.Unmarshal(buf[curr:])
-	if curr+int(wrapperMsg.LenWrappedBytes) > len(buf) {
-		return 0, ErrNotEnoughLen
-	}
-	wrapperMsg.WrappedMsgBytes = buf[curr : curr+int(wrapperMsg.LenWrappedBytes)]
+	wrapperMsg.WrappedMsgBytes = buf[curr:]
 	wrapperMsg.Sender = p
-	curr += int(wrapperMsg.LenWrappedBytes)
-	wrapperMsg.TotalMessageBytes = curr
+	curr += len(wrapperMsg.WrappedMsgBytes)
 	return curr, nil
 }

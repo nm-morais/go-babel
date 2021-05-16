@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -215,7 +216,8 @@ func (p *protoManager) SendMessage(
 // }
 
 func (p *protoManager) submitOrWait(f func()) {
-	p.pool.Submit(f)
+	// p.pool.Submit(f)
+	f()
 }
 
 func (p *protoManager) SendRequest(r request.Request, origin, destination protocol.ID) errors.Error {
@@ -394,6 +396,12 @@ func (p *protoManager) setupLoggers() {
 	}
 	pmMw := io.MultiWriter(all, protoManagerFile)
 	p.logger.SetOutput(pmMw)
+	notificationHubFile, err := os.Create(p.config.LogFolder + "/notificationHub.log")
+	if err != nil {
+		log.Panic(err)
+	}
+	nhMw := io.MultiWriter(all, notificationHubFile)
+	p.notificationHub.Logger().SetOutput(nhMw)
 	streamManagerFile, err := os.Create(p.config.LogFolder + "/streamManager.log")
 	if err != nil {
 		log.Panic(err)
@@ -448,6 +456,12 @@ func (p *protoManager) StartAsync() {
 }
 
 func (p *protoManager) StartSync() {
+
+	defer func() {
+		if x := recover(); x != nil {
+			p.logger.Panicf("run time PANIC: %v, STACK: %s", x, string(debug.Stack()))
+		}
+	}()
 
 	// p.logger.Infof("Starting Sync...")
 	p.logger.Infof("Setting up loggers...")

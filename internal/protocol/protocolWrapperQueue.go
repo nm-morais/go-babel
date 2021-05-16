@@ -253,10 +253,10 @@ func (pw *WrapperProtocol) handleChannels() {
 			pw.wrappedProtocol.OutConnDown(nextEvent.eventContent.(peer.Peer))
 		case messageDeliverySucessEvent:
 			event := nextEvent.eventContent.(messageWithPeer)
-			go pw.wrappedProtocol.MessageDelivered(event.message, event.peer)
+			pw.wrappedProtocol.MessageDelivered(event.message, event.peer)
 		case messageDeliveryFailureEvent:
 			event := nextEvent.eventContent.(messageWithPeerAndErr)
-			go pw.wrappedProtocol.MessageDeliveryErr(event.message, event.peer, event.err)
+			pw.wrappedProtocol.MessageDeliveryErr(event.message, event.peer, event.err)
 		case requestEvent:
 			event := nextEvent.eventContent.(*reqWithOriginProto)
 			reply := pw.handleRequest(event.req)

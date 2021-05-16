@@ -41,6 +41,25 @@ func (msg *ProtoHandshakeMessage) Serialize() []byte {
 	return toSend
 }
 
+// func (msg *ProtoHandshakeMessage) Deserialize(buf *bytes.Buffer) error {
+// 	if buf.Len() < 11 {
+// 		return ErrNotEnoughLen
+// 	}
+// 	b, err := buf.ReadByte()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	msg.TunnelType = b
+// 	err = binary.Read(buf, binary.BigEndian, &msg.DialerProto)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	p := &peer.IPeer{}
+// 	p.UnmarshalFromBuf(buf)
+// 	msg.Peer = p
+// 	return nil
+// }
+
 func (msg *ProtoHandshakeMessage) Deserialize(buf []byte) error {
 	if len(buf) < 11 {
 		return ErrNotEnoughLen
@@ -50,6 +69,7 @@ func (msg *ProtoHandshakeMessage) Deserialize(buf []byte) error {
 	bufPos++
 	dialerProto := binary.BigEndian.Uint16(buf[bufPos:])
 	bufPos += 2
+
 	p := &peer.IPeer{}
 	p.Unmarshal(buf[bufPos:])
 	msg.Peer = p
