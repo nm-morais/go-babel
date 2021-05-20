@@ -110,12 +110,13 @@ func NewWrapperProtocol(p protocol.Protocol, babel protocolManager.ProtocolManag
 }
 
 func (pw *WrapperProtocol) Enqueue(ev *event) {
-	select {
-	case pw.eventQueue <- ev:
-		return
-	case <-time.After(3 * time.Second):
-		pw.Logger().Panicf("Protocol is overloaded with too many events: %d", len(pw.eventQueue))
-	}
+	pw.eventQueue <- ev
+	// select {
+	// case pw.eventQueue <- ev:
+	// 	return
+	// case <-time.After(3 * time.Second):
+	// 	pw.Logger().Panicf("Protocol is overloaded with too many events: %d", len(pw.eventQueue))
+	// }
 }
 
 //  channel Deliverers
