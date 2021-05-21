@@ -29,7 +29,9 @@ import (
 )
 
 const (
-	MaxUDPMsgSize = 65535
+	MaxTCPFrameSize   = 65535
+	MaxUDPMsgSize     = 65535
+	WriteChanCapacity = 10_000
 )
 
 var (
@@ -184,7 +186,9 @@ func (ot *outboundTransport) writeToConn(batch *batch) error {
 
 func (ot *outboundTransport) writeOutboundMessages() {
 	defer ot.logger.Infof("Out connection exited...")
+
 	var connErr error
+
 	for batch := range ot.ToWrite {
 		if connErr != nil {
 			for _, cb := range batch.Callbacks {
@@ -331,7 +335,7 @@ func NewStreamManager(babel protocolManager.ProtocolManager, conf StreamManagerC
 	sm.logger.Infof("Starting streamManager with config: %+v", conf)
 
 	go func() {
-		for range time.NewTicker(10 * time.Second).C {
+		for range time.NewTicker(5 * time.Second).C {
 			sm.logMsgStats()
 		}
 	}()
@@ -420,14 +424,16 @@ func (sm *babelStreamManager) addMsgReceived(proto protocol.ID) {
 func (sm *babelStreamManager) closeConn(c io.Closer) {
 	err := c.Close()
 	if err != nil {
-		sm.logger.Errorf("Err: %+w", err)
+		sm.logger.Panicf("Err: %s", err.Error())
 	}
 }
 
 func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan interface{} {
 	done := make(chan interface{})
+
 	go func() {
 		sm.logger.Infof("Starting listener of type %s on addr: %s", lAddrInt.Network(), lAddrInt.String())
+
 		switch lAddr := lAddrInt.(type) {
 		case *net.TCPAddr:
 			listener, err := net.ListenTCP(lAddr.Network(), lAddr)
@@ -441,6 +447,14 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 				if err != nil {
 					sm.logger.Panic(err)
 				}
+				err = newStream.(*net.TCPConn).SetReadBuffer(MaxTCPFrameSize)
+				if err != nil {
+					sm.logger.Panic(err.Error())
+				}
+				err = newStream.(*net.TCPConn).SetWriteBuffer(MaxTCPFrameSize)
+				if err != nil {
+					sm.logger.Panic(err.Error())
+				}
 
 				go func() {
 					defer func() {
@@ -450,7 +464,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 					}()
 					// frameBasedConn := goframe.NewLengthFieldBasedFrameConn(streamManagerEncoderConfig, streamManagerDecoderConfig, newStream)
 
-					newStreamReader := bufio.NewReader(newStream)
+					newStreamReader := bufio.NewReaderSize(newStream, MaxTCPFrameSize)
 					defer newStreamReader.Discard(newStreamReader.Buffered())
 					handshakeMsg, err := sm.waitForHandshakeMessage(newStream, newStreamReader)
 					if err != nil {
@@ -459,6 +473,7 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 						sm.logStreamManagerState()
 						return
 					}
+
 					defer sm.closeConn(newStream)
 					remotePeer := handshakeMsg.Peer
 					if handshakeMsg.TunnelType == TemporaryTunnel {
@@ -528,7 +543,7 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 		Finished:    make(chan interface{}),
 		writersMux:  &sync.Mutex{},
 		writers:     &sync.WaitGroup{},
-		ToWrite:     make(chan *batch, 100),
+		ToWrite:     make(chan *batch, WriteChanCapacity),
 		conn:        nil,
 		batchMu:     &sync.Mutex{},
 		targetPeer:  toDial,
@@ -563,11 +578,22 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 			sm.outboundTransports.Delete(k)
 			return
 		}
+		if newStreamTyped, ok := conn.(*net.TCPConn); ok {
+			err = newStreamTyped.SetReadBuffer(MaxTCPFrameSize)
+			if err != nil {
+				sm.logger.Panic(err.Error())
+			}
+			err = newStreamTyped.SetWriteBuffer(MaxTCPFrameSize)
+			if err != nil {
+				sm.logger.Panic(err.Error())
+			}
+		}
+
 		switch newStreamTyped := conn.(type) {
 		case net.Conn:
 			// frameBasedConn := goframe.NewLengthFieldBasedFrameConn(streamManagerEncoderConfig, streamManagerDecoderConfig, newStreamTyped)
 			newOutboundTransport.conn = newStreamTyped
-			newOutboundTransport.writeBuf = bufio.NewWriter(newStreamTyped)
+			newOutboundTransport.writeBuf = bufio.NewWriterSize(newStreamTyped, MaxTCPFrameSize)
 			herr := sm.sendHandshakeMessage(newStreamTyped, dialingProto, PermanentTunnel)
 			if herr != nil {
 				sm.logger.Errorf("An error occurred during handshake with %s: %s", toDial.String(), herr)

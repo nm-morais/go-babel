@@ -11,6 +11,8 @@ import (
 
 var ErrNotEnoughLen = errors.New("not enough length to deserialize")
 
+const AppMessageWrapperHeaderSize = 14
+
 type AppMessageWrapper struct {
 	Sender          peer.Peer
 	MessageID       message.ID
@@ -40,7 +42,7 @@ func NewAppMessageWrapper(
 type AppMessageWrapperSerializer struct{}
 
 func (wrapperMsg *AppMessageWrapper) Serialize() []byte {
-	buf := make([]byte, 6)
+	buf := make([]byte, 6, AppMessageWrapperHeaderSize)
 	binary.BigEndian.PutUint16(buf, wrapperMsg.MessageID)
 	binary.BigEndian.PutUint16(buf[2:], wrapperMsg.SourceProto)
 	binary.BigEndian.PutUint16(buf[4:], wrapperMsg.DestProto)
@@ -77,7 +79,7 @@ func (wrapperMsg *AppMessageWrapper) Serialize() []byte {
 // }
 
 func (wrapperMsg *AppMessageWrapper) Deserialize(buf []byte) (curr int, err error) {
-	if len(buf) < 14 {
+	if len(buf) < AppMessageWrapperHeaderSize {
 		return 0, ErrNotEnoughLen
 	}
 	curr = 0
