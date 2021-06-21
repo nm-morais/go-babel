@@ -233,6 +233,15 @@ func (p *protoManager) SendRequest(r request.Request, origin, destination protoc
 	return nil
 }
 
+func (p *protoManager) SendRequestSync(req request.Request, origin protocol.ID, destination protocol.ID) (request.Reply, errors.Error) {
+	destProto, ok := p.protocols.Load(destination)
+	if !ok {
+		p.logger.Panicf("Protocol %d not registered", origin)
+	}
+	reply := destProto.(protocolValueType).DeliverRequestSync(req)
+	return reply, nil
+}
+
 func (p *protoManager) SendRequestReply(r request.Reply, origin, destination protocol.ID) errors.Error {
 	// p.submitOrWait(func() {
 	// p.logger.Info("Sending request reply")

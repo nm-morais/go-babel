@@ -76,6 +76,11 @@ type dialSuccessWithBoolReplyChan struct {
 	respChan     chan bool
 }
 
+type reqWithReplyChan struct {
+	req      request.Request
+	respChan chan request.Reply
+}
+
 type messageWithPeer struct {
 	peer    peer.Peer
 	message message.Message
@@ -123,6 +128,15 @@ func (pw *WrapperProtocol) Enqueue(ev *event) {
 
 func (pw *WrapperProtocol) DeliverRequestReply(reply request.Reply) {
 	pw.Enqueue(NewEvent(requestReplyEvent, reply))
+}
+
+func (pw *WrapperProtocol) DeliverRequestSync(req request.Request) request.Reply {
+	aux := &reqWithReplyChan{
+		req:      req,
+		respChan: make(chan request.Reply),
+	}
+	go pw.Enqueue(NewEvent(requestEvent, aux))
+	return <-aux.respChan
 }
 
 func (pw *WrapperProtocol) DeliverNotification(n notification.Notification) {
@@ -259,10 +273,15 @@ func (pw *WrapperProtocol) handleChannels() {
 			event := nextEvent.eventContent.(messageWithPeerAndErr)
 			pw.wrappedProtocol.MessageDeliveryErr(event.message, event.peer, event.err)
 		case requestEvent:
-			event := nextEvent.eventContent.(*reqWithOriginProto)
-			reply := pw.handleRequest(event.req)
-			if reply != nil {
-				go pw.babel.SendRequestReply(reply, pw.ID(), event.originProto)
+
+			switch event := nextEvent.eventContent.(type) {
+			case *reqWithOriginProto:
+				reply := pw.handleRequest(event.req)
+				if reply != nil {
+					go pw.babel.SendRequestReply(reply, pw.ID(), event.originProto)
+				}
+			case *reqWithReplyChan:
+				event.respChan <- pw.handleRequest(event.req)
 			}
 		case requestReplyEvent:
 			pw.handleReply(nextEvent.eventContent.(request.Reply))
