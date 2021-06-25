@@ -174,7 +174,6 @@ type NodeWatcherConf struct {
 	TcpTestTimeout            time.Duration
 	UdpTestTimeout            time.Duration
 	NrTestMessagesToSend      int
-	NrMessagesWithoutWait     int
 	NrTestMessagesToReceive   int
 	HbTickDuration            time.Duration
 	MinSamplesLatencyEstimate int
@@ -415,6 +414,7 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 	for i := 0; i < nm.conf.NrTestMessagesToSend; i++ {
 
 		//nm.logger.Infof("Writing test message to: %s", p.ToString())
+
 		_, err := nm.udpConn.WriteToUDP(
 			analytics.SerializeHeartbeatMessage(
 				analytics.NewHBMessageForceReply(
@@ -431,6 +431,7 @@ func (nm *NodeWatcherImpl) establishStreamTo(p peer.Peer, nodeInfo *NodeInfoImpl
 			nrErrors++
 			nm.logger.Warnf("Error sending udp message: %s", err.Error())
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	select {
