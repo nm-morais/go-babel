@@ -434,6 +434,12 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 	go func() {
 		sm.logger.Infof("Starting listener of type %s on addr: %s", lAddrInt.Network(), lAddrInt.String())
 
+		defer func() {
+			if x := recover(); x != nil {
+				sm.logger.Panicf("run time PANIC: %v, STACK: %s", x, string(debug.Stack()))
+			}
+		}()
+
 		switch lAddr := lAddrInt.(type) {
 		case *net.TCPAddr:
 			listener, err := net.ListenTCP(lAddr.Network(), lAddr)
@@ -559,8 +565,8 @@ func (sm *babelStreamManager) DialAndNotify(dialingProto protocol.ID, toDial pee
 	}
 	_, loaded := sm.outboundTransports.LoadOrStore(k, newOutboundTransport)
 	if loaded {
-		sm.logger.Warnf("Stream to %s already existed", toDial.String())
-		return errors.NonFatalError(500, "connection already up", streamManagerCaller)
+		sm.logger.Warnf("Stream already exists", toDial.String())
+		return errors.NonFatalError(500, "Stream already exists", streamManagerCaller)
 	}
 	go func() {
 		defer func() {
@@ -665,11 +671,11 @@ func (sm *babelStreamManager) writeFrame(conn io.Writer, frame []byte) error {
 	nrBytesToWrite := len(frame)
 	msgLenBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(msgLenBytes, uint32(nrBytesToWrite))
-	toWrite := append(msgLenBytes, frame...)
+	msgLenBytes = append(msgLenBytes, frame...)
 
 	curr := 0
-	for curr != len(toWrite) {
-		written, err := conn.Write(toWrite[curr:])
+	for curr != len(msgLenBytes) {
+		written, err := conn.Write(msgLenBytes[curr:])
 		curr += written
 		if err == io.EOF {
 			return err
@@ -696,7 +702,8 @@ func (sm *babelStreamManager) readFrame(reader io.Reader) ([]byte, error) {
 	}
 	nrBytesInMsg = binary.BigEndian.Uint32(msgSizeBytes)
 	if nrBytesInMsg == 0 {
-		sm.logger.Panicf("Reading frame with 0 bytes")
+		sm.logger.Errorf("Reading frame with 0 bytes")
+		return nil, fmt.Errorf("0 byte frame received")
 	}
 	// sm.logger.Infof("Reading frame with %d bytes", nrBytesInMsg)
 	msgBytes := make([]byte, nrBytesInMsg)
@@ -705,7 +712,8 @@ func (sm *babelStreamManager) readFrame(reader io.Reader) ([]byte, error) {
 	if readErr != nil {
 		if readErr == io.EOF {
 			if len(msgBytes) != n {
-				sm.logger.Panic("Frame size does not match message size")
+				sm.logger.Error("Frame size does not match message size")
+				return nil, readErr
 			}
 			return msgBytes[:n], nil
 		}

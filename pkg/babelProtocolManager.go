@@ -287,7 +287,7 @@ func (p *protoManager) MessageDelivered(sendingProto protocol.ID, msg message.Me
 	// p.submitOrWait(func() {
 	callerProto, ok := p.protocols.Load(sendingProto)
 	if !ok {
-		p.logger.Panicf("Protocol %d not registered, message type: %s, contents:%+v", sendingProto, reflect.TypeOf(msg), msg)
+		p.logger.Errorf("Protocol %d not registered, message type: %s, contents:%+v", sendingProto, reflect.TypeOf(msg), msg)
 	}
 	callerProto.(protocolValueType).MessageDelivered(msg, peer)
 	// })
@@ -297,7 +297,7 @@ func (p *protoManager) MessageDeliveryErr(sendingProto protocol.ID, msg message.
 	// p.submitOrWait(func() {
 	callerProto, ok := p.protocols.Load(sendingProto)
 	if !ok {
-		p.logger.Panicf("Protocol %d not registered, message type: %s, contents:%+v", sendingProto, reflect.TypeOf(msg), msg)
+		p.logger.Errorf("Protocol %d not registered, message type: %s, contents:%+v", sendingProto, reflect.TypeOf(msg), msg)
 
 	}
 	callerProto.(protocolValueType).MessageDeliveryErr(msg, peer, err)
@@ -342,7 +342,7 @@ func (p *protoManager) DeliverMessage(sender peer.Peer, msg message.Message, des
 	if toNotify, ok := p.protocols.Load(destProto); ok {
 		toNotify.(protocolValueType).DeliverMessage(sender, msg)
 	} else {
-		p.logger.Errorf("Protocol %d not registered, ignoring message type: %s, contents:%+v", destProto, reflect.TypeOf(msg), msg)
+		p.logger.Errorf("Protocol %d not registered, ignoring message type: %s", destProto, reflect.TypeOf(msg))
 	}
 	// })
 }
