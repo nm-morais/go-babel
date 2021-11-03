@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"reflect"
@@ -31,7 +30,7 @@ import (
 const (
 	MaxTCPFrameSize   = 65535
 	MaxUDPMsgSize     = 65535
-	WriteChanCapacity = 10_000
+	WriteChanCapacity = 10_000_000
 )
 
 var (
@@ -424,7 +423,7 @@ func (sm *babelStreamManager) addMsgReceived(proto protocol.ID) {
 func (sm *babelStreamManager) closeConn(c io.Closer) {
 	err := c.Close()
 	if err != nil {
-		sm.logger.Panicf("Err: %s", err.Error())
+		sm.logger.Errorf("Err closing connection: %s", err.Error())
 	}
 }
 
@@ -487,16 +486,9 @@ func (sm *babelStreamManager) AcceptConnectionsAndNotify(lAddrInt net.Addr) chan
 						return
 					}
 
-					sm.logger.Infof("New connection from %s", remotePeer.String())
-					if !sm.babel.InConnRequested(handshakeMsg.DialerProto, remotePeer) {
-						_, _ = io.Copy(ioutil.Discard, newStreamReader)
-						sm.logger.Infof("Peer %s conn was not accepted, closing stream", remotePeer.String())
-						sm.logStreamManagerState()
-						return
-					}
-
-					sm.logger.Infof("Accepted connection from %s successfully", remotePeer.String())
-					sm.inboundTransports.Store(remotePeer.String(), newStreamReader)
+					go sm.babel.InConnRequested(handshakeMsg.DialerProto, remotePeer)
+					// sm.logger.Infof("Accepted connection from %s successfully", remotePeer.String())
+					sm.inboundTransports.Store(remotePeer.String(), newStream)
 					sm.logStreamManagerState()
 					sm.handleInStream(newStreamReader, remotePeer)
 					sm.inboundTransports.Delete(remotePeer.String())
@@ -665,6 +657,15 @@ func (sm *babelStreamManager) Disconnect(disconnectingProto protocol.ID, p peer.
 	if loaded {
 		go outboundStreamInt.(*outboundTransport).close(nil)
 	}
+}
+
+func (sm *babelStreamManager) DisconnectInStream(disconnectingProto protocol.ID, p peer.Peer) {
+
+	stream, ok := sm.inboundTransports.Load(p.String())
+	if !ok {
+		return
+	}
+	sm.closeConn(stream.(net.Conn))
 }
 
 func (sm *babelStreamManager) writeFrame(conn io.Writer, frame []byte) error {

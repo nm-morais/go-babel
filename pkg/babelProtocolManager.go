@@ -316,9 +316,12 @@ func (p *protoManager) SelfPeer() peer.Peer {
 	return p.config.Peer
 }
 
-func (p *protoManager) InConnRequested(targetProto protocol.ID, dialer peer.Peer) bool {
+func (p *protoManager) InConnRequested(targetProto protocol.ID, dialer peer.Peer) {
 	if proto, ok := p.protocols.Load(targetProto); ok {
-		return proto.(protocolValueType).InConnRequested(targetProto, dialer)
+		if !proto.(protocolValueType).InConnRequested(targetProto, dialer) {
+			p.streamManager.DisconnectInStream(targetProto, dialer)
+		}
+		return
 	}
 	panic("No proto for dialer proto")
 }

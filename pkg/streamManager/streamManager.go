@@ -22,5 +22,6 @@ type StreamManager interface {
 	) errors.Error
 	SendMessage(toSend message.Message, peer peer.Peer, origin protocol.ID, destination protocol.ID, batch bool)
 	Disconnect(disconnectingProto protocol.ID, p peer.Peer)
+	DisconnectInStream(disconnectingProto protocol.ID, p peer.Peer)
 	Logger() *logrus.Logger
 }
