@@ -33,7 +33,7 @@ type ProtocolManager interface {
 
 	RegisterListenAddr(addr net.Addr)
 	Dial(dialingProto protocol.ID, peer peer.Peer, toDial net.Addr) errors.Error
-	InConnRequested(dialerProto protocol.ID, dialer peer.Peer)
+	InConnRequested(dialerProto protocol.ID, dialer peer.Peer) bool
 	DialError(sourceProto protocol.ID, dialedPeer peer.Peer)
 
 	DialSuccess(dialerProto protocol.ID, dialedPeer peer.Peer) bool
